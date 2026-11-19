@@ -43,6 +43,9 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "Review GitLab merge requests with a local, read-only AI agent",
-    "longDescription": "Peerlens lists your GitLab merge requests and reviews them with Claude Code or Codex running locally in read-only mode. It talks to GitLab only through glab with GET requests. Nothing is applied, committed or posted."
+    "longDescription": "Peerlens lists your GitLab merge requests and reviews them with Claude Code or Codex running locally in read-only mode. It talks to GitLab only through glab with GET requests. Nothing is applied, committed or posted.",
+    "macOS": {
+      "signingIdentity": "-"
+    }
   }
 }

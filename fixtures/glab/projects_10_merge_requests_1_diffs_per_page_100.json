@@ -1,0 +1,46 @@
+[
+ {
+  "old_path": "src/auth.py",
+  "new_path": "src/auth.py",
+  "diff": "@@ -1,4 +1,6 @@\n import time\n-def login(u, p):\n+def login(u, p, attempts={}):\n+    attempts[u] = attempts.get(u, 0) + 1\n     return check(u, p)\n \n",
+  "new_file": false,
+  "renamed_file": false,
+  "deleted_file": false,
+  "collapsed": false,
+  "too_large": false,
+  "generated_file": false
+ },
+ {
+  "old_path": "poetry.lock",
+  "new_path": "poetry.lock",
+  "diff": "@@ -1 +1 @@\n-a\n+b\n",
+  "new_file": false,
+  "renamed_file": false,
+  "deleted_file": false,
+  "collapsed": false,
+  "too_large": false,
+  "generated_file": true
+ },
+ {
+  "old_path": "logo.png",
+  "new_path": "logo.png",
+  "diff": "",
+  "new_file": true,
+  "renamed_file": false,
+  "deleted_file": false,
+  "collapsed": false,
+  "too_large": false,
+  "generated_file": false
+ },
+ {
+  "old_path": "src/limits.py",
+  "new_path": "src/limits.py",
+  "diff": "@@ -0,0 +1,2 @@\n+MAX = 5\n+WINDOW = 60\n",
+  "new_file": true,
+  "renamed_file": false,
+  "deleted_file": false,
+  "collapsed": false,
+  "too_large": false,
+  "generated_file": false
+ }
+]

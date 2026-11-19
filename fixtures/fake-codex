@@ -1,0 +1,19 @@
+#!/bin/sh
+# Fake `codex exec --json` for tests. Mode = value of --model: ok | nologin | repo
+cat > /dev/null
+MODE=ok; prev=""; CD=""; for a in "$@"; do [ "$prev" = "--model" ] && MODE="$a"; [ "$prev" = "--cd" ] && CD="$a"; prev="$a"; done
+[ -n "$FAKE_AGENT_LOG" ] && { echo "argv: $*"; echo "home: $HOME"; echo "codex_home: $CODEX_HOME"; env | grep -E '^(GITLAB|GLAB|GITHUB|GH)_' | sed 's/=.*/=<set>/'; } > "$FAKE_AGENT_LOG.codex-$MODE"
+echo '{"type":"thread.started","thread_id":"t1"}'
+echo '{"type":"turn.started"}'
+case "$MODE" in
+  nologin)
+    echo '{"type":"error","message":"Reconnecting... 1/5 (unexpected status 401 Unauthorized)"}'
+    echo "2026-01-01T00:00:00Z ERROR codex_api: noisy log line" >&2
+    echo '{"type":"turn.failed","error":{"message":"unexpected status 401 Unauthorized: Missing bearer or basic authentication in header"}}'
+    exit 1 ;;
+  repo)
+    printf '{"type":"item.started","item":{"id":"i1","type":"command_execution","command":"rg -n check %s/src","status":"in_progress"}}\n' "$CD"
+    printf '{"type":"item.completed","item":{"id":"i1","type":"command_execution","command":"rg -n check %s/src","exit_code":0,"status":"completed"}}\n' "$CD" ;;
+esac
+printf '%s\n' '{"type":"item.completed","item":{"id":"i2","type":"agent_message","text":"{\"type\":\"finding\",\"file\":\"src/auth.py\",\"start_line\":2,\"end_line\":2,\"severity\":\"major\",\"category\":\"bug\",\"title\":\"Shared default dict\",\"explanation\":\"x\"}\n{\"type\":\"summary\",\"text\":\"Needs changes.\"}"}}'
+echo '{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":5}}'

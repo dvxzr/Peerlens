@@ -1,0 +1,35 @@
+#!/bin/sh
+# Fake agent mimicking `claude -p --output-format stream-json`. Mode = value of --model: ok | garbage | slow | fail
+cat > /dev/null   # consume the prompt
+MODE=ok; prev=""; for a in "$@"; do [ "$prev" = "--model" ] && MODE="$a"; prev="$a"; done
+if [ -n "$FAKE_AGENT_LOG" ]; then
+  FAKE_AGENT_LOG="$FAKE_AGENT_LOG.$MODE"
+  { echo "argv: $*"; echo "pwd: $(pwd)"; echo "files: $(ls -A | wc -l | tr -d ' ')"; echo "pgid: $(ps -o pgid= -p $$ | tr -d ' ')";
+    echo "pid: $$"; env | grep -E '^(GITLAB|GLAB|GITHUB|GH|GIT)_' | sed 's/=.*/=<set>/'; } > "$FAKE_AGENT_LOG"
+fi
+delta() { printf '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"%s"}}}\n' "$1"; }
+printf '{"type":"system","subtype":"init","tools":[]}\n'
+if [ "$MODE" = repo ]; then
+  ADD=""; prev=""; for a in "$@"; do [ "$prev" = "--add-dir" ] && ADD="$a"; prev="$a"; done
+  [ -n "$FAKE_AGENT_LOG" ] && { echo "add-dir: $ADD"; echo "repo-files: $(find "$ADD" -type f | sed "s#$ADD/##" | sort | tr '\n' ' ')"; } >> "$FAKE_AGENT_LOG"
+  printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"%s/src/auth.py"}}]}}\n' "$ADD"
+  MODE=ok
+fi
+if [ "$MODE" = hot ]; then
+  printf '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","unifiedWindows":{"five_hour":{"utilization":0.9,"resetsAt":9999999999,"status":"allowed"}}}}\n'
+  MODE=ok
+fi
+case "$MODE" in
+  fail) echo "boom: not logged in" >&2; exit 3 ;;
+  garbage) delta 'Sorry, I cannot produce JSON today.\n'; delta 'Here is prose instead.' ;;
+  slow) delta '{\"type\":\"finding\",\"file\":\"src/auth.py\",\"start_line\":2,\"end_line\":2,\"severity\":\"major\",\"category\":\"bug\",\"title\":\"slow one\",\"explanation\":\"e\"}\n'
+        sleep 30; delta '{\"type\":\"summary\",\"text\":\"never\"}\n' ;;
+  *)
+    delta '```json\n{\"type\":\"finding\",\"file\":\"src/auth.py\",\"start_line\":2,'
+    sleep 0.1
+    delta '\"end_line\":3,\"severity\":\"major\",\"category\":\"bug\",\"title\":\"Mutable default argument\",\"explanation\":\"attempts={} is shared\",\"suggestion\":{\"description\":\"Use None\",\"code\":\"def login(u, p, attempts=None):\"}}\n'
+    delta 'not json at all\n'
+    delta '{\"type\":\"finding\",\"file\":\"src/auth.py\",\"start_line\":999,\"end_line\":999,\"severity\":\"minor\",\"category\":\"design\",\"title\":\"Out of diff\",\"explanation\":\"x\"}\n'
+    delta '{\"type\":\"summary\",\"text\":\"One real bug.\"}\n```' ;;
+esac
+printf '{"type":"result","result":"ignored because deltas were sent"}\n'

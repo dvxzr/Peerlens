@@ -1,0 +1,42 @@
+[
+ {
+  "project_id": 10,
+  "iid": 1,
+  "title": "Add login rate limit",
+  "web_url": "https://gitlab.example.com/group/backend/-/merge_requests/1",
+  "author": {
+   "id": 274,
+   "username": "alice",
+   "name": "Alice"
+  },
+  "source_branch": "feat-1",
+  "target_branch": "main",
+  "updated_at": "2026-11-18T10:00:00Z",
+  "draft": false,
+  "sha": "abc123",
+  "references": {
+   "full": "group/backend!1"
+  },
+  "user_notes_count": 2
+ },
+ {
+  "project_id": 10,
+  "iid": 2,
+  "title": "Draft: refactor cache",
+  "web_url": "https://gitlab.example.com/group/backend/-/merge_requests/2",
+  "author": {
+   "id": 274,
+   "username": "alice",
+   "name": "Alice"
+  },
+  "source_branch": "feat-2",
+  "target_branch": "main",
+  "updated_at": "2026-11-17T10:00:00Z",
+  "draft": true,
+  "sha": "abc123",
+  "references": {
+   "full": "group/backend!2"
+  },
+  "user_notes_count": 2
+ }
+]

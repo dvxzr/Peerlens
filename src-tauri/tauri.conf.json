@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Peerlens",
+  "version": "0.1.0",
+  "identifier": "dev.peerlens.app",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "title": "Peerlens",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 1000,
+        "minHeight": 600,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "backgroundColor": "#121219",
+        "trafficLightPosition": {
+          "x": 18,
+          "y": 25
+        }
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.png"
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "Review GitLab merge requests with a local, read-only AI agent",
+    "longDescription": "Peerlens lists your GitLab merge requests and reviews them with Claude Code or Codex running locally in read-only mode. It talks to GitLab only through glab with GET requests. Nothing is applied, committed or posted."
+  }
+}

@@ -1,0 +1,7 @@
+[
+ {
+  "old_path": "src/auth.py",
+  "new_path": "src/auth.py",
+  "diff": "@@ -1 +1 @@\n-a\n+b\n"
+ }
+]

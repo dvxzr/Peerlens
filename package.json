@@ -1,0 +1,27 @@
+{
+  "name": "peerlens",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Desktop app for reviewing GitLab merge requests with a local, read-only AI agent",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.12.5",
+    "highlight.js": "^11.12.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@tauri-apps/cli": "^2.12.6",
+    "@tsconfig/svelte": "^5.0.9",
+    "svelte": "^5.58.0",
+    "svelte-check": "^4.7.8",
+    "typescript": "~5.9.3",
+    "vite": "^8.3.8"
+  }
+}

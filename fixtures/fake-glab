@@ -1,0 +1,8 @@
+#!/bin/sh
+# Fake glab for tests: serves fixtures/glab/<sanitized endpoint>.json, logs argv.
+[ -n "$FAKE_GLAB_LOG" ] && echo "$*" >> "$FAKE_GLAB_LOG"
+[ "$1" = api ] || { echo "fake-glab: only 'api' supported" >&2; exit 2; }
+for a in "$@"; do ep="$a"; done
+name=$(printf %s "$ep" | sed 's#[^A-Za-z0-9]#_#g')
+f="$(dirname "$0")/glab/$name"
+if [ -f "$f.json" ]; then cat "$f.json"; elif [ -f "$f.bin" ]; then cat "$f.bin"; else echo "glab: HTTP 404" >&2; exit 1; fi

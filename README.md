@@ -52,12 +52,24 @@ or via your login shell. You can also set their paths in Settings.
 Download a package from [Releases](../../releases).
 
 **macOS:** pick the `.dmg` for your Mac: `aarch64` for Apple Silicon (M1 and later), `x64` for Intel. Drag Peerlens to
-Applications. The builds are not signed or notarized yet, so macOS blocks the first launch. Open it once via
-**System Settings → Privacy & Security → Open Anyway**, or run:
+Applications. The builds are not signed or notarized by Apple yet, so the first launch shows *"Apple could not verify
+Peerlens…"*. Allow it once:
+
+1. Click **Done**.
+2. Open **System Settings → Privacy & Security**, scroll down to **Security** and click **Open Anyway** next to
+   *"Peerlens" was blocked*. Confirm with your password or Touch ID, then click **Open**.
+
+After that Peerlens starts normally, and in-app updates don't ask again.
+
+Prefer the terminal? Remove the quarantine flag from the downloaded `.dmg` **before** opening it (macOS doesn't let
+a terminal change apps that are already in `/Applications`):
 
 ```sh
-xattr -dr com.apple.quarantine /Applications/Peerlens.app
+xattr -d com.apple.quarantine ~/Downloads/Peerlens_*_aarch64.dmg   # or _x64.dmg
 ```
+
+If macOS says *"Peerlens is damaged"*, you have a build from before v0.1.0 was fixed: download it again from the
+latest release.
 
 **Linux (x86_64):**
 

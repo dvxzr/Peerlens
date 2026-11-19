@@ -4,6 +4,7 @@
   import { ago } from "../lib/time";
   import Icon from "./Icon.svelte";
   import { pref, setPref } from "../lib/prefs";
+  import { updates } from "../lib/updates.svelte";
 
   let { mrs, loading, error, refreshedAt, selected, onselect, onrefresh, onsettings, onhide }: {
     mrs: MrSummary[]; loading: boolean; error: string; refreshedAt: number | null;
@@ -42,7 +43,10 @@
     <button class="ghost icon" onclick={onrefresh} disabled={loading} title="Refresh merge requests ({kb('R')})">
       <Icon name="refresh" size={16} class={loading ? "spin" : ""} />
     </button>
-    <button class="ghost icon" onclick={onsettings} title="Settings ({kb(',')})"><Icon name="settings" size={16} /></button>
+    <button class="ghost icon setbtn" onclick={onsettings}
+      title={updates.available ? `Update available: v${updates.available.version} (Settings → Updates)` : `Settings (${kb(",")})`}>
+      <Icon name="settings" size={16} />{#if updates.available}<span class="udot"></span>{/if}
+    </button>
     <button class="ghost icon" onclick={onhide} title="Hide sidebar ({kb('B')})"><Icon name="sidebarLeft" size={16} /></button>
   </div>
   <div class="searchbox">
@@ -103,6 +107,8 @@
   :global(html.mac) .titlebar { padding-left: 86px; } /* room for the traffic lights */
   .brand { flex: 1; display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: 13.5px; letter-spacing: .01em; }
   .logo { display: grid; place-items: center; color: var(--text); }
+  .setbtn { position: relative; }
+  .udot { position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--bg0); }
   .searchbox { position: relative; margin: 2px 10px 6px; display: flex; align-items: center; }
   .searchbox :global(.sicon) { position: absolute; left: 10px; color: var(--text3); pointer-events: none; }
   .searchbox input { width: 100%; padding-left: 30px; padding-right: 28px; background: var(--bg2); height: 32px; }

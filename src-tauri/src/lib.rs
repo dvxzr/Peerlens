@@ -6,6 +6,7 @@ pub mod gitlab;
 pub mod platform;
 pub mod review;
 pub mod settings;
+pub mod update;
 
 pub fn run() {
     tracing_subscriber::fmt()
@@ -32,6 +33,7 @@ pub fn run() {
                 })
                 .build(),
         )
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
         .invoke_handler(tauri::generate_handler![
             commands::get_settings,
@@ -50,6 +52,9 @@ pub fn run() {
             commands::get_usage,
             commands::delete_review,
             commands::default_guidelines,
+            commands::app_version,
+            commands::check_update,
+            commands::install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

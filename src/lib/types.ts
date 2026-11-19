@@ -65,4 +65,6 @@ export type ReviewEvent =
   | { type: "error"; message: string }
   | { type: "done"; review: StoredReview };
 
+export interface UpdateInfo { current: string; version: string; date: string | null; notes: string; can_install: boolean; release_url: string }
+export type UpdateProgress = { type: "downloading"; done: number; total: number | null } | { type: "installing" };
 export type MenuItem<V> = { value: V; label: string; desc?: string; icon?: IconName; color?: string; disabled?: boolean };

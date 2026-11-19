@@ -26,6 +26,8 @@ through [`glab`](https://gitlab.com/gitlab-org/cli), and only with read requests
   your plan usage reaches a threshold (shown in the panel).
 - **Saved reviews.** The last review per MR is kept on disk. It is marked "stale" when the MR gets new commits, and
   you can delete it.
+- **In-app updates.** Settings → Updates → Check for updates shows the changelog and installs the new version
+  with one click (signed and verified). Peerlens never checks in the background.
 - Dark and light themes, keyboard shortcuts, and a small footprint: about 4 MB binary and ~0% CPU when idle.
 
 <details><summary>Light theme</summary>
@@ -72,6 +74,10 @@ sudo dnf install ./Peerlens-*.x86_64.rpm
 
 The `.deb` and `.rpm` pull in WebKitGTK 4.1 automatically. The AppImage needs it installed
 (`libwebkit2gtk-4.1-0` on Debian/Ubuntu, `webkit2gtk4.1` on Fedora).
+
+**Updating:** Settings → Updates → **Check for updates**, then **Update & restart**. This works for the macOS app,
+the AppImage, `.deb` and `.rpm` (the last two ask for your password to install). Builds made from source link to
+the download page instead.
 
 **From source:**
 
@@ -168,6 +174,27 @@ fixtures/      fake glab / claude / codex used by tests
 dev/           mock backend for working on the UI in a browser
 scripts/       app icon source (swift scripts/icon.swift icon.png && pnpm tauri icon icon.png)
 ```
+
+## Releasing
+
+1. One-time: create the updater signing key and add it to the repository secrets
+   (Settings → Secrets and variables → Actions):
+   ```sh
+   pnpm tauri signer generate -w ~/.tauri/peerlens-updater.key     # keep the key and password safe
+   ```
+   - `TAURI_SIGNING_PRIVATE_KEY`: contents of `~/.tauri/peerlens-updater.key`
+   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: its password
+
+   Put the public key (`~/.tauri/peerlens-updater.key.pub`) into `plugins.updater.pubkey` in
+   `src-tauri/tauri.conf.json`. Losing the private key means installed apps can no longer update themselves.
+2. Bump the version, commit, tag and push:
+   ```sh
+   python3 scripts/release.py bump 0.2.0
+   git commit -am "chore: release 0.2.0" && git tag v0.2.0 && git push origin main v0.2.0
+   ```
+3. The release workflow builds macOS and Linux packages, writes the changelog from the `feat:`/`fix:` commits since
+   the previous tag, signs the update bundles and uploads `latest.json` to a **draft** release. Review it and
+   publish; installed apps see the update only after that.
 
 ## Roadmap
 

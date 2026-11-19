@@ -21,6 +21,7 @@ Advisories) instead of opening a public issue. Include steps to reproduce and th
 | Repo snapshot | Downloaded with `glab api … /repository/archive.tar.gz` (GET), unpacked in-process: regular files only (no symlinks/hardlinks), no `..`/absolute paths, secret-looking files skipped, size limits; deleted after the review. | `review::repo` tests |
 | Untrusted text in the UI | MR text and agent output are rendered as text. Markdown is parsed into data and rendered with text nodes (no `{@html}`); only `http(s)` links, opened in the system browser; remote images are never loaded. The only `{@html}` uses are highlight.js output (escaped, structure-checked) and the app's own SVG icons. | WebKit checks in development |
 | Webview | Strict CSP (no remote scripts, images or connections), no `withGlobalTauri`, navigation outside the app is blocked, settings from the UI are validated (binary overrides must be absolute paths to `glab*`/`claude*`/`codex*`). | `settings` tests |
+| In-app updates | Only on user action. The Tauri updater downloads `latest.json` from this repository's latest published release and refuses any package whose signature doesn't match the public key built into the app (private key kept in GitHub secrets). The updater is driven from Rust; the webview has no updater permissions. | `scripts/release.py self-test` |
 | Prompt injection | The system prompt marks all MR content as data. Findings are text only; nothing is applied, committed or posted. | — |
 
 ## Known limitations

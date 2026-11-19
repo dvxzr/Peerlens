@@ -1,5 +1,8 @@
-# Push a tag like v0.1.0 → builds macOS and Linux packages and attaches them to ONE draft GitHub release.
-# Review the draft and publish it by hand. macOS builds are not code-signed or notarized.
+# Push a tag like v0.2.0 → builds macOS and Linux packages, signs updater artifacts, writes the changelog
+# and latest.json, and attaches everything to ONE draft release. Review the draft and publish it by hand;
+# installed apps see the update only after it is published.
+#
+# Required secrets: TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD (updater signing key).
 name: release
 on:
   push:
@@ -14,14 +17,28 @@ jobs:
     outputs:
       id: ${{ steps.release.outputs.id }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag must match the app version
+        run: python3 scripts/release.py check-version "$GITHUB_REF_NAME"
+      - name: Signing key must be configured
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: test -n "$KEY" || { echo "::error::Add the TAURI_SIGNING_PRIVATE_KEY secret (see README → Releasing)"; exit 1; }
       - id: release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
-            --title "Peerlens $TAG" \
-            --notes "Install notes are in the README. macOS builds are unsigned; Linux packages are AppImage, .deb and .rpm."
+          {
+            python3 scripts/release.py notes "$TAG"
+            echo
+            echo "---"
+            echo "Install: see the README. macOS builds are unsigned (System Settings → Privacy & Security → Open Anyway)."
+            echo "Already installed? Settings → Updates → Check for updates."
+          } > notes.md
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "Peerlens $TAG" --notes-file notes.md
           echo "id=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json databaseId -q .databaseId)" >> "$GITHUB_OUTPUT"
 
   build:
@@ -64,6 +81,30 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           releaseId: ${{ needs.create-release.outputs.id }}
-          args: ${{ matrix.args }}
+          # latest.json is written once by the job below, so parallel builds can't overwrite each other.
+          includeUpdaterJson: false
+          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
+
+  updater-manifest:
+    needs: [create-release, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          python3 scripts/release.py self-test
+          mkdir sigs
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.sig' --dir sigs
+          ls sigs
+          python3 scripts/release.py notes "$TAG" > notes.md
+          python3 scripts/release.py latest-json --tag "$TAG" --repo "$GITHUB_REPOSITORY" --sigs sigs --notes notes.md > latest.json
+          cat latest.json
+          gh release upload "$TAG" latest.json --repo "$GITHUB_REPOSITORY" --clobber

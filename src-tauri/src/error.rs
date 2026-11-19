@@ -12,6 +12,8 @@ pub enum AppError {
     Glab { code: i32, stderr: String },
     #[error("Agent: {0}")]
     Agent(String),
+    #[error("Update: {0}")]
+    Update(String),
     #[error("Cancelled")]
     Cancelled,
     #[error("I/O: {0}")]

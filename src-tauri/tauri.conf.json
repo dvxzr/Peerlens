@@ -47,5 +47,13 @@
     "macOS": {
       "signingIdentity": "-"
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFBREE0QTMwNzI5NUNBN0YKUldSL3lwVnlNRXJhR2g5NFpSNFd1SFBFVkZCZE1VVmpKWFM4NmJ5K1I5N0Rzbkg4S0g0MWZOd3IK",
+      "endpoints": [
+        "https://github.com/dvxzr/Peerlens/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

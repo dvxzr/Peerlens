@@ -8,6 +8,8 @@
   import { EFFORTS, LANGUAGES } from "../lib/options";
   import { api } from "../lib/api";
   import { onMount } from "svelte";
+  import Markdown from "./Markdown.svelte";
+  import { updates, checkForUpdates, installUpdate, loadVersion } from "../lib/updates.svelte";
 
   let { settings, agents = [], onsave, onclose, onpreview }: {
     settings: Settings; agents?: AgentInfo[]; onsave: (s: Settings) => void; onclose: () => void; onpreview: (theme: Settings["theme"]) => void;
@@ -36,6 +38,7 @@
   let defaultGuide = $state("");
   let guide = $state(s.review_guidelines);
   onMount(async () => {
+    loadVersion();
     defaultGuide = await api.defaultGuidelines();
     if (!guide.trim()) guide = defaultGuide;
   });
@@ -71,6 +74,37 @@
             <button class:on={s.theme === v} onclick={() => setTheme(v)}><Icon name={ic} size={14} />{l}</button>
           {/each}
         </div>
+      </section>
+
+      <section>
+        <h3><Icon name="refresh" size={14} />Updates</h3>
+        <div class="f">
+          <span>Peerlens {updates.version ? `v${updates.version}` : ""}
+            {#if updates.checked && !updates.available}<em>· up to date</em>{/if}</span>
+          <button onclick={checkForUpdates} disabled={updates.checking || updates.installing}>
+            <Icon name="refresh" size={13} class={updates.checking ? "spin" : ""} />{updates.checking ? "Checking…" : "Check for updates"}
+          </button>
+        </div>
+        {#if updates.error}<div class="uerr"><Icon name="alert" size={13} /><span>{updates.error}</span></div>{/if}
+        {#if updates.available}
+          {@const u = updates.available}
+          <div class="upd">
+            <div class="uh">
+              <b>v{u.version} is available</b>
+              <span class="dim">{u.date ?? ""}</span>
+            </div>
+            {#if u.notes.trim()}<div class="notes"><Markdown text={u.notes} /></div>{/if}
+            {#if updates.installing}
+              <div class="ubar"><span style:width={updates.progress < 0 ? "100%" : `${Math.round(updates.progress * 100)}%`} class:indet={updates.progress < 0}></span></div>
+              <div class="dim small">{updates.progress >= 1 ? "Installing… the app will restart" : "Downloading…"}</div>
+            {:else if u.can_install}
+              <button class="primary" onclick={installUpdate}><Icon name="sparkles" size={14} />Update & restart</button>
+            {:else}
+              <button onclick={() => api.openUrl(u.release_url)}><Icon name="external" size={14} />Download v{u.version}</button>
+              <div class="dim small">This build can't update itself (built from source). Download the new version instead.</div>
+            {/if}
+          </div>
+        {/if}
       </section>
 
       <section>
@@ -164,6 +198,15 @@
   .custom { display: flex; gap: 6px; }
   .custom input { flex: 1; min-width: 0; width: auto; }
   .guide { width: 100%; font-size: 12px; line-height: 1.5; min-height: 220px; }
+  .upd { margin-top: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg1); display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+  .uh { display: flex; gap: 10px; align-items: baseline; width: 100%; }
+  .uh .dim { margin-left: auto; font-size: 12px; }
+  .notes { max-height: 220px; overflow-y: auto; width: 100%; font-size: 12.5px; }
+  .ubar { width: 100%; height: 5px; background: var(--bg4); border-radius: 3px; overflow: hidden; }
+  .ubar span { display: block; height: 100%; background: var(--accent); transition: width 200ms var(--ease); }
+  .ubar span.indet { opacity: .6; }
+  .uerr { display: flex; gap: 7px; align-items: flex-start; color: var(--red); font-size: 12px; margin-top: 6px; overflow-wrap: anywhere; }
+  .small { font-size: 11.5px; }
   .gbtns { display: flex; justify-content: flex-end; margin-top: 8px; }
   .gbtns button { gap: 6px; font-size: 12px; }
   h3 .pill { text-transform: none; letter-spacing: 0; }

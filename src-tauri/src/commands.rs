@@ -147,6 +147,30 @@ pub fn load_review(project_id: u64, iid: u64) -> Option<storage::StoredReview> {
 }
 
 #[tauri::command]
+pub fn app_version(app: tauri::AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+#[tauri::command]
+pub async fn check_update(app: tauri::AppHandle) -> Result<Option<crate::update::UpdateInfo>> {
+    crate::update::check(&app).await
+}
+
+#[tauri::command]
+pub async fn install_update(
+    app: tauri::AppHandle,
+    st: State<'_, AppState>,
+    on_progress: Channel<crate::update::UpdateProgress>,
+) -> Result<()> {
+    if st.running.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err(crate::error::AppError::Update(
+            "Wait for the running review to finish (or cancel it) first.".into(),
+        ));
+    }
+    crate::update::install(&app, &on_progress).await
+}
+
+#[tauri::command]
 pub fn default_guidelines() -> &'static str {
     review::prompt::DEFAULT_GUIDELINES
 }

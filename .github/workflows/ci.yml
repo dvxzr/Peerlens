@@ -39,6 +39,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: python3 scripts/release.py self-test
       - run: pnpm check
       - run: pnpm build
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check

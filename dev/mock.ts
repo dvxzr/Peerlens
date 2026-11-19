@@ -111,6 +111,9 @@ const handlers: Record<string, (a: any) => any> = {
   get_usage: () => usage,
   cancel_review: () => null,
   delete_review: () => null,
+  app_version: () => "0.1.0",
+  check_update: () => new Promise((r) => setTimeout(() => r({ current: "0.1.0", version: "0.2.0", date: "2026-12-01", notes: "## What's new\n\n### Features\n- Split diff view\n- Faster repo snapshots\n\n### Fixes\n- Pinned header overlapped the next file", can_install: true, release_url: "https://github.com/dvxzr/Peerlens/releases/tag/v0.2.0" }), 400)),
+  install_update: () => new Promise(() => {}),
   default_guidelines: () => "You are a principal engineer reviewing a merge request.\n\nWhat to check, in priority order:\n1. Correctness…\n\nRules:\n- Report only problems introduced by this change…",
   start_review: () => new Promise(() => {}),
 };

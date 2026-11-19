@@ -26,6 +26,7 @@ dirs = "6"
 # Repo context: unpack the GitLab archive in-process (pure Rust, no `tar` subprocess).
 flate2 = "1"
 tar = { version = "0.4", default-features = false }
+tauri-plugin-updater = "2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

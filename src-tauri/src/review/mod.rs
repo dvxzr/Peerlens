@@ -49,6 +49,15 @@ pub enum ReviewEvent {
     },
 }
 
+/// Events of one reply in a finding's discussion thread.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ThreadEvent {
+    Text { text: String },
+    Usage { usage: Usage },
+    Done { thread: Vec<storage::ThreadMsg> },
+}
+
 /// Mark a finding anchored if its lines exist on the new side of that file; fill the snippet from the diff.
 pub fn anchor(f: &mut crate::agents::parser::Finding, files: &[FileDiff]) {
     let Some(fd) = files.iter().find(|d| d.new_path == f.file || d.old_path == f.file) else {

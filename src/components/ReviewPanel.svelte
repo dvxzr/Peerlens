@@ -1,12 +1,13 @@
 <script lang="ts">
   import { kb } from "../lib/platform";
   import type { AgentInfo, AgentKind, Finding, MenuItem as Item, Settings } from "../lib/types";
-  import { start, get, usage, loadUsage, remove } from "../lib/review.svelte";
+  import { start, get, usage, loadUsage, remove, discuss, removeThread } from "../lib/review.svelte";
+  import Markdown from "./Markdown.svelte";
   import { api } from "../lib/api";
   import { ago } from "../lib/time";
   import { onMount, tick } from "svelte";
   import { pref, setPref } from "../lib/prefs";
-  import { fly, fade, slide, scale } from "svelte/transition";
+  import { fly, fade, slide } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import Menu from "./Menu.svelte";
   import Icon from "./Icon.svelte";
@@ -97,9 +98,18 @@
   let notes = $state("");
   let notesOpen = $state(false);
   let notesEl: HTMLTextAreaElement | undefined = $state();
+  // Grow with the text up to the CSS max-height, then scroll; no manual resize handle.
+  $effect(() => {
+    void notes;
+    if (!notesEl) return;
+    notesEl.style.height = "auto";
+    notesEl.style.height = `${notesEl.scrollHeight + 2}px`;
+  });
   $effect(() => {
     notes = pref<string>(notesKey, "") ?? "";
     notesOpen = false;
+    openThread = null;
+    draft = "";
   });
   const saveNotes = () => setPref(notesKey, notes);
   async function editNotes() {
@@ -107,26 +117,9 @@
     await tick();
     notesEl?.focus();
   }
-  function addNote(line: string) {
-    if (notes.includes(line)) return;
-    notes = (notes.trimEnd() ? notes.trimEnd() + "\n" : "") + line;
-    saveNotes();
-    notesEl?.focus();
-  }
   function notesBlur(e: FocusEvent) {
     if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) notesOpen = false;
   }
-
-  let showMore = $state(false);
-  let moreEl: HTMLDivElement | undefined = $state();
-  $effect(() => {
-    if (!showMore) return;
-    const h = (e: PointerEvent) => !moreEl?.contains(e.target as Node) && (showMore = false);
-    const k = (e: KeyboardEvent) => e.key === "Escape" && (showMore = false);
-    window.addEventListener("pointerdown", h, true);
-    window.addEventListener("keydown", k);
-    return () => { window.removeEventListener("pointerdown", h, true); window.removeEventListener("keydown", k); };
-  });
 
   onMount(loadUsage);
   const winLabel = (n: string) => ({ five_hour: "5-hour", seven_day: "Weekly", seven_day_opus: "Weekly Opus" })[n] ?? n.replaceAll("_", " ");
@@ -138,8 +131,41 @@
   let worst = $derived(usage.value?.windows.filter((w) => w.resets_at * 1000 > Date.now()).sort((a, b) => b.utilization - a.utilization)[0]);
   let overLimit = $derived(agent === "claude" && !!usage.value?.windows.some((w) => w.utilization * 100 >= settings.max_usage_pct && w.resets_at * 1000 > Date.now()));
 
+  // Finding discussion threads: one open at a time, sent with the agent/model chosen above.
+  let openThread = $state<number | null>(null);
+  let draft = $state("");
+  let confirmThread = $state<number | null>(null);
+  let threadErr = $state("");
+  let modelLabel = $derived(modelItems.find((m) => m.value === model)?.label || "default model");
+  function toggleThread(i: number) {
+    if (openThread !== i) draft = "";
+    openThread = openThread === i ? null : i;
+    threadErr = "";
+  }
+  async function send(i: number) {
+    const m = draft.trim();
+    if (!m || r?.running || r?.chat || overLimit || codexNotLoggedIn) return;
+    draft = "";
+    if (!(await discuss(projectId, iid, i, m, agent, model, effort))) draft ||= m;
+  }
+  async function delThread(i: number) {
+    if (confirmThread !== i) {
+      confirmThread = i;
+      setTimeout(() => confirmThread === i && (confirmThread = null), 3000);
+      return;
+    }
+    confirmThread = null;
+    try { await removeThread(projectId, iid, i); threadErr = ""; } catch (e) { threadErr = String(e); }
+  }
+  function grow(e: Event) {
+    const t = e.currentTarget as HTMLTextAreaElement;
+    t.style.height = "auto";
+    t.style.height = `${t.scrollHeight + 2}px`;
+  }
+
   function run() {
-    if (r?.running || (scope === "file" && !currentFile) || overLimit || codexNotLoggedIn) return;
+    if (r?.running || r?.chat || (scope === "file" && !currentFile) || overLimit || codexNotLoggedIn) return;
+    openThread = null; // a new review replaces findings and their threads
     start(projectId, iid, agent, model, effort, scope === "file" ? currentFile : null, language, repoContext, notes.trim());
   }
   function keys(e: KeyboardEvent) {
@@ -205,6 +231,75 @@
         {/if}
       </div>
     {/if}
+    {#if r?.createdAt && !r.running}
+      {@const thread = r.threads[i] ?? []}
+      <div class="cfoot">
+        <button class="ghost disc" class:on={openThread === i} onclick={() => toggleThread(i)} aria-expanded={openThread === i}>
+          <Icon name="message" size={13} />Discuss
+        </button>
+        {#if thread.length}<span class="tcount" title="{thread.length} messages"><Icon name="message" size={11} />{thread.length}</span>{/if}
+      </div>
+      {#if openThread === i}
+        <div class="thread" transition:slide={{ duration: 160 }}>
+          <div class="ctx">
+            <span>Context:</span>
+            <span class="pill"><Icon name="target" size={11} />this finding</span>
+            {#if f.file}<span class="pill mono">{f.file.split("/").pop()} diff</span>{/if}
+            {#if stale}<span class="pill stalep" title="The MR changed since the review; the agent sees the current diff"><Icon name="clock" size={11} />MR changed</span>{/if}
+            <span class="sp"></span>
+            {#if thread.length}
+              <button class="ghost icon tbtn" class:confirm={confirmThread === i} onclick={() => delThread(i)}
+                title={confirmThread === i ? "Click again to delete the thread" : "Delete thread"} disabled={!!r.chat}><Icon name="trash" size={13} /></button>
+            {/if}
+            <button class="ghost icon tbtn" onclick={() => (openThread = null)} title="Collapse"><Icon name="chevronDown" size={13} style="transform:rotate(180deg)" /></button>
+          </div>
+          {#each thread as m, j (j)}{@render msg(m.role, m.text, m.by, m.at)}{/each}
+          {#if r.chat?.index === i}
+            {@render msg("user", r.chat.message, "", null)}
+            {@render msg("agent", r.chat.reply, "", null, true)}
+          {/if}
+          {#if r.chatError?.index === i}<div class="warn"><Icon name="alert" size={14} /><span>{r.chatError.message}</span></div>{/if}
+          {#if threadErr}<div class="warn"><Icon name="alert" size={14} /><span>{threadErr}</span></div>{/if}
+          <div class="tinp">
+            <textarea bind:value={draft} oninput={grow} rows="2" maxlength={4000} placeholder="Reply about this finding…" spellcheck="false"
+              onkeydown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); e.stopPropagation(); send(i); } }}></textarea>
+            <div class="tbar">
+              <span class="dim">{agent === "claude" ? "Claude" : "Codex"} · {modelLabel}</span>
+              <span class="sp"></span>
+              {#if r.chat?.index === i}
+                <button class="tstop" onclick={() => api.cancelReview()}><Icon name="stop" size={12} />Cancel</button>
+              {:else}
+                <button class="primary tsend" onclick={() => send(i)} disabled={!draft.trim() || !!r.chat || overLimit || codexNotLoggedIn}>
+                  Send<kbd>{kb("↵")}</kbd>
+                </button>
+              {/if}
+            </div>
+          </div>
+          <div class="tnote"><Icon name="eye" size={11} />Agent sees only this finding and the diff of its file. Each reply resends the thread.</div>
+        </div>
+      {/if}
+    {/if}
+  </div>
+{/snippet}
+
+{#snippet msg(role: string, text: string, by: string, at: number | null, live = false)}
+  {@const isAgent = role === "agent"}
+  {@const kind = isAgent ? (by ? (by.startsWith("Codex") ? "codex" : "claude") : agent) : null}
+  <div class="msg">
+    <span class="av" class:agentav={isAgent} style:color={kind === "claude" ? "var(--orange)" : undefined}>
+      <Icon name={kind ?? "user"} size={12} />
+    </span>
+    <div class="mbody">
+      <div class="who">
+        <b>{isAgent ? (by || (agent === "claude" ? "Claude" : "Codex")) : "You"}</b>
+        {#if live}<span class="dim">· writing…</span>{:else if at}<span class="dim">· {ago(at * 1000)}</span>{/if}
+      </div>
+      {#if isAgent}
+        {#if text}<div class="mtext"><Markdown {text} /></div>{:else}<div class="dim thinking">Thinking…</div>{/if}
+      {:else}
+        <div class="mtext utext">{text}</div>
+      {/if}
+    </div>
   </div>
 {/snippet}
 
@@ -229,16 +324,18 @@
             label={effort ? effortItems.find((x) => x.value === effort)?.label : "Auto effort"} />
           <Menu items={scopeItems} value={scope} onselect={(v) => (scope = v)} title="What to review" align="right" width={260} />
           <Menu items={langItems} value={language} onselect={(v) => (language = v)} title="Language of the review text" align="right" />
-          {#if repoContext}<span class="rc" title="Repo context is on"><Icon name="folder" size={13} /></span>{/if}
+          <button class="rc" class:on={repoContext} onclick={() => (repoContext = !repoContext)} role="switch" aria-checked={repoContext}
+            title={repoContext
+              ? "Repo context on: the agent may read a read-only snapshot of the repo at the MR head (secrets removed, deleted after). Uses more of your limits."
+              : "Repo context off: the agent sees only the diff. Click to let it read the repo."}>
+            <Icon name="folder" size={13} />Repo
+          </button>
         </div>
         {#if notesOpen}
           <div class="notes" role="group" aria-label="Reviewer notes" onfocusout={notesBlur}>
             <textarea bind:this={notesEl} onkeydown={(e) => e.key === "Escape" && (notesOpen = false)} bind:value={notes} oninput={saveNotes} rows="3" maxlength={MAX_NOTES} spellcheck="false"
               placeholder="Task description, what to focus on, what to skip…"></textarea>
             <div class="nbar">
-              <button class="nchip" onclick={() => addNote("Focus on security.")}>+ security</button>
-              <button class="nchip" onclick={() => addNote("Check that tests cover the change.")}>+ tests</button>
-              <button class="nchip" onclick={() => addNote("Skip nits and style.")}>− skip nits</button>
               <span class="ncount mono">{notes.length} / {MAX_NOTES}</span>
             </div>
             <div class="nhint"><Icon name="message" size={12} />MR title and description are already included.</div>
@@ -256,55 +353,24 @@
             <button class="stopbtn" onclick={() => api.cancelReview()}><Icon name="stop" size={14} />Cancel</button>
             <span class="prog dim">{r.repoStage === "downloading" ? "Downloading repo…" : r.progress ? `Part ${r.progress.chunk} of ${r.progress.total}` : "Starting…"}</span>
           {:else}
-            <button class="primary go" onclick={run} disabled={(scope === "file" && !currentFile) || overLimit || codexNotLoggedIn}
+            <button class="primary go" onclick={run} disabled={!!r?.chat || (scope === "file" && !currentFile) || overLimit || codexNotLoggedIn}
               title={overLimit ? `Paused: usage is over ${settings.max_usage_pct}%` : `Run a read-only review (${kb("↵")})`}>
               <Icon name="sparkles" size={15} />{r?.createdAt ? "Re-review" : "Review"}<kbd>{kb("↵")}</kbd>
             </button>
           {/if}
-          <div class="more" bind:this={moreEl}>
-            <button class="icon gear" class:open={showMore} onclick={() => (showMore = !showMore)} title="More options" aria-expanded={showMore}>
-              <Icon name="settings" size={15} />
-            </button>
-            {#if showMore}
-              <div class="morepop" transition:scale={{ start: 0.96, duration: 130, easing: cubicOut }}>
-                <button class="toggle" class:on={repoContext} onclick={() => (repoContext = !repoContext)} role="switch" aria-checked={repoContext}>
-                  <span class="sw"><span class="knob"></span></span>
-                  <span class="tt">
-                    <span class="tl"><Icon name="folder" size={14} />Repo context</span>
-                    <span class="td">{repoContext
-                      ? "Agent may read a snapshot of the repo at the MR head (read-only, secrets removed, deleted after). Uses more of your limits."
-                      : "Agent sees only the diff."}</span>
-                    {#if repoContext && agent === "codex"}
-                      <span class="td warnline">Codex reads code with shell commands in a read-only, offline sandbox. Unlike Claude it can't be limited to the snapshot folder; the prompt forbids reading elsewhere.</span>
-                    {/if}
-                  </span>
-                </button>
-                {#if agent === "claude" && usage.value?.windows.length}
-                  <div class="usage" title="Your Claude subscription usage, as reported by Claude Code">
-                    {#each usage.value.windows as w (w.name)}
-                      {@const pct = Math.round(w.utilization * 100)}
-                      <div class="uw">
-                        <span class="ul">{winLabel(w.name)}</span>
-                        <span class="bar"><span class="fill" class:hot={pct >= settings.max_usage_pct} class:warm={pct >= settings.max_usage_pct * 0.7} style:width="{Math.min(100, pct)}%"></span></span>
-                        <span class="up mono">{pct}%</span>
-                        <span class="ur dim">resets in {resetIn(w.resets_at)}</span>
-                      </div>
-                    {/each}
-                  </div>
-                {/if}
-              </div>
-            {/if}
-          </div>
         </div>
         {#if agent === "claude" && worst}
           {@const pct = Math.round(worst.utilization * 100)}
-          <button class="uline" onclick={() => (showMore = true)} title="Claude usage: all limits in More options">
+          <div class="uline" title={usage.value?.windows.map((w) => `${winLabel(w.name)}: ${Math.round(w.utilization * 100)}% · resets in ${resetIn(w.resets_at)}`).join("\n")}>
             <Icon name="gauge" size={12} /><span class="dim">{winLabel(worst.name)}</span>
             <span class="bar"><span class="fill" class:hot={pct >= settings.max_usage_pct} class:warm={pct >= settings.max_usage_pct * 0.7} style:width="{Math.min(100, pct)}%"></span></span>
             <span class="mono">{pct}%</span><span class="dim">· {resetIn(worst.resets_at)}</span>
-          </button>
+          </div>
         {/if}
       </div>
+      {#if repoContext && agent === "codex" && !r?.running}
+        <div class="note-warn"><Icon name="alert" size={13} /><span>Codex reads repo code with shell commands in a read-only, offline sandbox. Unlike Claude it can't be limited to the snapshot folder; the prompt forbids reading elsewhere.</span></div>
+      {/if}
       {#if codexNotLoggedIn && !r?.running}
         <div class="note-warn"><Icon name="terminal" size={13} /><span>Codex is not logged in. Run <code>codex login</code> in a terminal, then reopen Settings and press Save to re-check.</span></div>
       {/if}
@@ -397,16 +463,17 @@
   .cfg :global(.menu .trigger svg:first-child) { width: 13px; height: 13px; }
   .cfg :global(.menu .trigger .chev) { display: none; }
   .cfg :global(.menu:first-child .trigger .lbl) { color: var(--text); }
-  .rc { display: inline-flex; padding: 2px 5px; color: var(--accent); }
+  .rc { gap: 5px; padding: 2px 6px; font-size: 12px; border-radius: 6px; border: 1px dashed var(--border2); background: transparent; color: var(--text3); }
+  .rc:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+  .rc.on { border-style: solid; border-color: transparent; background: var(--accent-bg); color: var(--accent); }
+  .rc.on:hover:not(:disabled) { background: var(--accent-bg); color: var(--accent); }
   .nadd { justify-content: flex-start; gap: 6px; padding: 2px 4px; border: none; background: transparent; color: var(--text3); font-size: 12px; }
   .nadd:hover:not(:disabled) { background: transparent; color: var(--text); }
   .nadd:active:not(:disabled) { transform: none; }
   .notes { display: flex; flex-direction: column; gap: 6px; }
-  .notes textarea { width: 100%; resize: vertical; min-height: 64px; max-height: 240px; font-size: 12px; line-height: 1.5; background: var(--bg1); border-color: var(--border2); }
+  .notes textarea { width: 100%; resize: none; min-height: 64px; max-height: 240px; overflow-y: auto; font-size: 12px; line-height: 1.5; background: var(--bg1); border-color: var(--border2); }
   .notes textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
   .nbar { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
-  .nchip { padding: 1px 8px; border-radius: 999px; font-size: 11px; background: transparent; border-color: var(--border2); color: var(--text2); }
-  .nchip:hover:not(:disabled) { background: transparent; border-color: var(--accent); color: var(--accent); }
   .ncount { margin-left: auto; font-size: 10.5px; color: var(--text3); }
   .nhint { display: flex; gap: 5px; align-items: center; font-size: 11px; color: var(--text3); }
   .nprev { display: flex; gap: 4px; align-items: flex-start; }
@@ -419,18 +486,7 @@
   .nquote:active:not(:disabled) { transform: none; }
   .nclear { width: 24px; height: 24px; color: var(--text3); }
   .act { display: flex; gap: 6px; align-items: center; }
-  .more { position: relative; flex: none; }
-  .gear { width: 34px; height: 34px; padding: 0; }
-  .gear.open { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
-  .morepop {
-    position: absolute; top: calc(100% + 6px); right: 0; z-index: 50; width: min(320px, 80vw); transform-origin: top right;
-    background: var(--bg2); border-radius: 12px; box-shadow: var(--shadow); padding: 6px; display: flex; flex-direction: column; gap: 6px;
-  }
-  .morepop .toggle { background: transparent; border-color: transparent; }
-  .morepop .toggle:hover { background: var(--bg3); }
-  .uline { justify-content: flex-start; gap: 6px; padding: 0 2px; border: none; background: transparent; font-size: 11px; }
-  .uline:hover:not(:disabled) { background: transparent; }
-  .uline:active:not(:disabled) { transform: none; }
+  .uline { display: flex; align-items: center; gap: 6px; padding: 0 2px; font-size: 11px; cursor: default; }
   .uline :global(svg) { color: var(--text3); flex: none; }
   .uline .bar { flex: 1; }
   .custom { display: flex; gap: 6px; }
@@ -440,36 +496,20 @@
   .note-warn { display: flex; gap: 7px; align-items: flex-start; font-size: 11.5px; color: var(--orange); line-height: 1.4; }
   .note-warn :global(svg) { flex: none; margin-top: 1px; }
   .note-warn code { font-family: var(--mono); background: var(--bg3); padding: 0 4px; border-radius: 4px; }
-  .td.warnline { color: var(--orange); }
   .stopbtn { flex: 1; height: 34px; color: var(--red); border-color: color-mix(in srgb, var(--red) 35%, transparent); }
   .prog { font-size: 12px; white-space: nowrap; }
   .indet { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; overflow: hidden; }
   .indet span { position: absolute; inset: 0 auto 0 0; width: 35%; background: var(--accent); border-radius: 2px; animation: slide 1.1s var(--ease) infinite; }
   @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
-  .toggle { justify-content: flex-start; align-items: flex-start; gap: 10px; text-align: left; background: var(--bg2); padding: 8px 10px; border-radius: 9px; }
-  .toggle:active:not(:disabled) { transform: none; }
-  .sw { width: 30px; height: 18px; border-radius: 9px; background: var(--bg4); position: relative; flex: none; margin-top: 1px; transition: background-color var(--t) var(--ease); }
-  .knob { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--text2); transition: transform 180ms var(--ease), background-color var(--t); }
-  .toggle.on .sw { background: var(--accent); }
-  .toggle.on .knob { transform: translateX(12px); background: #fff; }
-  .tt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-  .tl { display: flex; align-items: center; gap: 6px; font-weight: 600; }
-  .tl :global(svg) { color: var(--text3); }
-  .td { font-size: 11.5px; color: var(--text3); line-height: 1.4; white-space: normal; }
   .repo { display: flex; align-items: center; gap: 6px; font-size: 11.5px; margin-bottom: 6px; }
   .activity { margin-bottom: 8px; font-size: 12px; }
   .activity summary { cursor: pointer; display: flex; align-items: center; gap: 6px; color: var(--text2); list-style: none; }
   .activity summary :global(svg) { color: var(--text3); }
   .acts { max-height: 180px; overflow-y: auto; margin-top: 6px; padding: 6px 8px; background: var(--bg2); border-radius: 8px; border: 1px solid var(--border); }
   .act { font-size: 11px; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.6; }
-  .usage { display: flex; flex-direction: column; gap: 5px; padding: 8px 10px; background: var(--bg2); border-radius: 9px; border: 1px solid var(--border); }
-  .uw { display: grid; grid-template-columns: 74px 1fr 34px auto; gap: 8px; align-items: center; font-size: 11.5px; }
-  .ul { color: var(--text2); }
   .bar { height: 5px; background: var(--bg4); border-radius: 3px; overflow: hidden; }
   .fill { display: block; height: 100%; background: var(--green); border-radius: 3px; transition: width 400ms var(--ease); }
   .fill.warm { background: var(--yellow); } .fill.hot { background: var(--red); }
-  .up { text-align: right; font-size: 11px; }
-  .ur { font-size: 11px; }
   .results { overflow-y: auto; flex: 1; padding: 12px 14px 24px; }
   .meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 11.5px; margin-bottom: 8px; }
   .del { margin-left: auto; padding: 2px 8px; font-size: 11.5px; gap: 5px; color: var(--text3); }
@@ -512,6 +552,35 @@
   .copy { font-size: 11px; padding: 2px 8px; gap: 4px; background: transparent; border-color: transparent; }
   .copy:hover:not(:disabled) { background: var(--bg4); }
   .copy.done { color: var(--green); }
+  .cfoot { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+  .disc { padding: 2px 8px; gap: 5px; font-size: 11.5px; }
+  .disc.on { color: var(--accent); }
+  .tcount { display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; border-radius: 999px; background: var(--accent-bg); color: var(--accent); font-size: 11px; }
+  .thread { margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+  .ctx { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; font-size: 11px; color: var(--text3); }
+  .pill { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 6px; background: var(--bg3); color: var(--text2); font-size: 11px; }
+  .pill.stalep { background: color-mix(in srgb, var(--yellow) 12%, transparent); color: var(--yellow); }
+  .sp { flex: 1; }
+  .tbtn { width: 24px; height: 24px; color: var(--text3); }
+  .tbtn.confirm { color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); }
+  .msg { display: flex; gap: 8px; min-width: 0; }
+  .av { width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; flex: none; background: var(--bg4); color: var(--text2); }
+  .av.agentav { background: var(--bg3); }
+  .mbody { flex: 1; min-width: 0; }
+  .who { font-size: 11px; color: var(--text3); margin-bottom: 2px; }
+  .who b { color: var(--text2); font-weight: 600; }
+  .mtext { font-size: 12.5px; line-height: 1.5; overflow-wrap: anywhere; }
+  .utext { white-space: pre-wrap; }
+  .thinking { font-size: 12px; animation: pulse 1.2s var(--ease) infinite alternate; }
+  @keyframes pulse { from { opacity: .45; } to { opacity: 1; } }
+  .tinp { border: 1px solid var(--border2); background: var(--bg1); border-radius: 9px; padding: 6px 8px; transition: border-color var(--t) var(--ease); }
+  .tinp:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+  .tinp textarea { width: 100%; border: none; background: transparent; padding: 0; resize: none; min-height: 36px; max-height: 180px; overflow-y: auto; font-size: 12.5px; line-height: 1.5; }
+  .tinp textarea:focus { background: transparent; }
+  .tbar { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; }
+  .tsend { padding: 3px 10px; font-size: 12px; }
+  .tstop { padding: 3px 10px; font-size: 12px; gap: 5px; color: var(--red); border-color: color-mix(in srgb, var(--red) 35%, transparent); }
+  .tnote { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text3); }
   .summary { background: var(--bg2); border: 1px solid var(--border); padding: 10px 12px; border-radius: 11px; white-space: pre-wrap; line-height: 1.5; }
   .warn { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 9px; color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); font-size: 12px; margin-bottom: 6px; overflow-wrap: anywhere; }
   .warn :global(svg) { flex: none; margin-top: 1px; }

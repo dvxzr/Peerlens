@@ -79,6 +79,12 @@ const review = {
   skipped: [{ path: "poetry.lock", reason: "lock file" }, { path: "assets/logo.png", reason: "binary or empty" }],
   activity: ["Grep MAX_ATTEMPTS  in .", "Read src/auth/settings.py", "Glob **/test_login*.py"],
   repo: { files: 552, bytes: 5213243, excluded: [".env"], skipped_large: 0, skipped_links: 0 },
+  threads: {
+    0: [
+      { role: "user", text: "We already reset the counter in the auth middleware after a successful login. Isn't that enough?", at: Date.now() / 1000 - 300, by: "" },
+      { role: "agent", by: "Claude / sonnet", at: Date.now() / 1000 - 280, text: "Not quite. Resetting on success doesn't help the failure path: `attempts={}` is still **one dict shared by every caller**, so:\n\n- failed attempts of all users add up in the same process;\n- the counter lives as long as the worker, so a restart silently resets every limit;\n- with several workers each one has its own copy, so the real limit is `MAX_ATTEMPTS × workers`.\n\nI can't see the middleware, so check that it calls `store.reset(user)` on the same store the limiter reads. If you move the counter to Redis with a TTL, both issues go away and the finding can be closed." },
+    ],
+  },
   summaries: ["Needs changes: the limiter keeps its state in a mutable default argument and the user lookup builds SQL with string formatting. Fix both before merging."],
   findings: [
     { file: "src/auth/login.py", start_line: 3, end_line: 4, severity: "critical", category: "bug", title: "Mutable default argument keeps state across calls", explanation: "`attempts={}` is created once and shared by every call and every user, so the counter never resets and one user can lock out others.", snippet: "def login(user, password, attempts={}):", suggestion: { description: "Keep the counter in a store with a TTL and pass it in.", code: "def login(user, password, store: AttemptStore):\n    if store.incr(user) > MAX_ATTEMPTS:\n        raise PermissionError(...)" }, anchored: true },
@@ -116,6 +122,15 @@ const handlers: Record<string, (a: any) => any> = {
   install_update: () => new Promise(() => {}),
   default_guidelines: () => "You are a principal engineer reviewing a merge request.\n\nWhat to check, in priority order:\n1. Correctness…\n\nRules:\n- Report only problems introduced by this change…",
   start_review: () => new Promise(() => {}),
+  discuss_finding: async (a) => {
+    const reply = "Good point. If the list is always capped at 20 items this is a **nit**, not a bug.";
+    for (const w of reply.split(/(?= )/)) { await new Promise((r) => setTimeout(r, 60)); a.onEvent.onmessage({ type: "text", text: w }); }
+    const t = review.threads[a.index] ?? [];
+    t.push({ role: "user", text: a.message, at: Date.now() / 1000, by: "" }, { role: "agent", text: reply, at: Date.now() / 1000, by: "Claude / sonnet" });
+    review.threads[a.index] = t;
+    a.onEvent.onmessage({ type: "done", thread: t });
+  },
+  delete_thread: (a) => { delete review.threads[a.index]; return null; },
 };
 let cbId = 0;
 (window as any).__TAURI_INTERNALS__ = {

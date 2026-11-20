@@ -1,5 +1,5 @@
 import { api, errText } from "./api";
-import type { AgentKind, Finding, Skipped, SnapshotStats, StoredReview, Usage } from "./types";
+import type { AgentKind, Finding, Skipped, SnapshotStats, StoredReview, ThreadMsg, Usage } from "./types";
 
 export interface ReviewState {
   running: boolean;
@@ -16,6 +16,11 @@ export interface ReviewState {
   repoStage: "" | "downloading" | "ready";
   repo: SnapshotStats | null;
   activity: string[];
+  /** Discussion threads keyed by finding index. */
+  threads: Record<number, ThreadMsg[]>;
+  /** The thread reply being written right now. */
+  chat: { index: number; message: string; reply: string } | null;
+  chatError: { index: number; message: string } | null;
 }
 
 // Latest Claude subscription usage, shared by all panels.
@@ -27,6 +32,7 @@ export async function loadUsage() {
 const empty = (): ReviewState => ({
   running: false, progress: null, findings: [], summaries: [], skipped: [], errors: [], raw: "",
   headSha: "", createdAt: null, cancelled: false, meta: "", repoStage: "", repo: null, activity: [],
+  threads: {}, chat: null, chatError: null,
 });
 
 // One review state per MR, kept in memory so switching MRs doesn't lose a running review.
@@ -38,7 +44,7 @@ function fromStored(r: StoredReview): ReviewState {
     ...empty(), findings: r.findings, summaries: r.summaries, skipped: r.skipped, errors: r.errors, raw: r.raw,
     headSha: r.head_sha, createdAt: r.created_at * 1000, cancelled: r.cancelled,
     meta: `${r.agent}${r.model ? " / " + r.model : ""}${r.effort ? " / " + r.effort : ""} · ${r.language} · ${r.scope}${r.repo ? " · repo context" : ""}`,
-    repo: r.repo ?? null, repoStage: r.repo ? "ready" : "", activity: r.activity ?? [],
+    repo: r.repo ?? null, repoStage: r.repo ? "ready" : "", activity: r.activity ?? [], threads: r.threads ?? {},
   };
 }
 
@@ -89,4 +95,34 @@ export async function start(
 export async function remove(pid: number, iid: number) {
   await api.deleteReview({ projectId: pid, iid });
   reviews[key(pid, iid)] = empty();
+}
+
+/** Send one message in a finding's thread. Resolves true when the reply was saved. */
+export async function discuss(
+  pid: number, iid: number, index: number, message: string, agent: AgentKind, model: string, effort: string,
+): Promise<boolean> {
+  const s = reviews[key(pid, iid)];
+  if (!s || s.running || s.chat) return false;
+  s.chat = { index, message, reply: "" };
+  s.chatError = null;
+  try {
+    await api.discussFinding({ projectId: pid, iid }, index, message, agent, model, effort, (e) => {
+      if (e.type === "text" && s.chat) s.chat.reply += e.text;
+      else if (e.type === "usage") usage.value = e.usage;
+      else if (e.type === "done") s.threads[index] = e.thread;
+    });
+    return true;
+  } catch (e) {
+    const m = errText(e);
+    if (m !== "Cancelled") s.chatError = { index, message: m };
+    return false;
+  } finally {
+    s.chat = null;
+  }
+}
+
+export async function removeThread(pid: number, iid: number, index: number) {
+  await api.deleteThread({ projectId: pid, iid }, index);
+  const s = reviews[key(pid, iid)];
+  if (s) delete s.threads[index];
 }

@@ -2,7 +2,7 @@ use crate::agents::{self, runner::RunSpec, AgentInfo, AgentKind};
 use crate::diff::FileDiff;
 use crate::error::Result;
 use crate::gitlab::{api, models::*, runner::Glab};
-use crate::review::{self, storage, ReviewEvent};
+use crate::review::{self, storage, ReviewEvent, ThreadEvent};
 use crate::settings::{self, Settings};
 use std::sync::Mutex;
 use tauri::ipc::Channel;
@@ -266,10 +266,7 @@ pub async fn start_review(
         kind: agent,
         bin: info.path.clone().into(),
         model: Some(model.clone()).filter(|m| !m.trim().is_empty()),
-        effort: Some(effort.clone()).filter(|e| match agent {
-            AgentKind::Claude => crate::agents::runner::EFFORTS.contains(&e.as_str()),
-            AgentKind::Codex => crate::agents::runner::CODEX_EFFORTS.contains(&e.as_str()),
-        }),
+        effort: valid_effort(agent, &effort),
         system_prompt: review::prompt::system_prompt(&language, agent, snap.is_some(), &s.review_guidelines, &notes),
         known_features: (agent == AgentKind::Codex)
             .then(|| crate::agents::runner::codex_probe(std::path::Path::new(&info.path)).features),
@@ -308,5 +305,137 @@ pub async fn start_review(
         }
     }
     emit(ReviewEvent::Done { review: Box::new(r) });
+    Ok(())
+}
+
+/// The effort level if this agent's CLI accepts it.
+fn valid_effort(agent: AgentKind, effort: &str) -> Option<String> {
+    let ok = match agent {
+        AgentKind::Claude => crate::agents::runner::EFFORTS.contains(&effort),
+        AgentKind::Codex => crate::agents::runner::CODEX_EFFORTS.contains(&effort),
+    };
+    ok.then(|| effort.to_string())
+}
+
+/// One turn of a finding's discussion: the agent sees the finding, its file's diff and the thread so far (no tools).
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn discuss_finding(
+    st: State<'_, AppState>,
+    project_id: u64,
+    iid: u64,
+    index: usize,
+    message: String,
+    agent: AgentKind,
+    model: String,
+    effort: String,
+    on_event: Channel<ThreadEvent>,
+) -> Result<()> {
+    use crate::agents::runner::AgentEvent;
+    use crate::error::AppError::Agent;
+    let message: String = message.trim().chars().take(review::prompt::MAX_THREAD_MSG).collect();
+    if message.is_empty() {
+        return Err(Agent("Write a message first.".into()));
+    }
+    let dir = storage::default_dir().ok_or_else(|| Agent("No app data directory.".into()))?;
+    let mut stored = storage::load_latest(&dir, project_id, iid).ok_or_else(|| Agent("Run a review first.".into()))?;
+    let finding = stored
+        .findings
+        .get(index)
+        .cloned()
+        .ok_or_else(|| Agent("This finding no longer exists. Reload the review.".into()))?;
+    let s = st.settings.lock().unwrap().clone();
+    let g = Glab::from_settings(&s)?;
+    let info = agents::detect(&s)
+        .into_iter()
+        .find(|a| a.kind == agent)
+        .ok_or_else(|| crate::error::AppError::BinaryNotFound(format!("{agent:?}")))?;
+    check_can_start(&st, &s, agent)?;
+    st.running.store(true, std::sync::atomic::Ordering::SeqCst);
+    let _guard = RunningGuard(&st.running);
+    let (tx, mut rx) = watch::channel(false);
+    if let Some(old) = st.cancel.lock().unwrap().replace(tx) {
+        let _ = old.send(true);
+    }
+    let (mr, files) = tokio::try_join!(api::mr_details(&g, project_id, iid), api::mr_diffs(&g, project_id, iid))?;
+    let file = files
+        .iter()
+        .find(|d| d.new_path == finding.file || d.old_path == finding.file);
+    let history = stored.threads.get(&index).cloned().unwrap_or_default();
+    let prompt = review::prompt::thread_user_prompt(&mr.title, &finding, file, &history, &message, s.max_review_bytes);
+    let spec = RunSpec {
+        kind: agent,
+        bin: info.path.clone().into(),
+        model: Some(model.clone()).filter(|m| !m.trim().is_empty()),
+        effort: valid_effort(agent, &effort),
+        system_prompt: review::prompt::thread_system_prompt(&stored.language),
+        known_features: (agent == AgentKind::Codex)
+            .then(|| crate::agents::runner::codex_probe(std::path::Path::new(&info.path)).features),
+        timeout: std::time::Duration::from_secs(s.agent_timeout_secs.max(30)),
+        repo: None,
+    };
+    let mut reply = String::new();
+    let mut failed = None;
+    agents::runner::run(&spec, &prompt, &mut rx, |e| match e {
+        AgentEvent::Text(t) => {
+            reply.push_str(&t);
+            let _ = on_event.send(ThreadEvent::Text { text: t });
+        }
+        AgentEvent::Usage(u) => {
+            *st.usage.lock().unwrap() = Some(u.clone());
+            let _ = on_event.send(ThreadEvent::Usage { usage: u });
+        }
+        AgentEvent::Error(m) => failed = Some(m),
+        AgentEvent::Tool(..) => {}
+    })
+    .await?;
+    if let Some(m) = failed {
+        return Err(Agent(m));
+    }
+    if reply.trim().is_empty() {
+        return Err(Agent("The agent returned no answer.".into()));
+    }
+    let by = format!(
+        "{agent:?}{}",
+        if model.is_empty() {
+            String::new()
+        } else {
+            format!(" / {model}")
+        }
+    );
+    let thread = stored.threads.entry(index).or_default();
+    thread.push(storage::ThreadMsg {
+        role: "user".into(),
+        text: message,
+        at: now_secs(),
+        by: String::new(),
+    });
+    thread.push(storage::ThreadMsg {
+        role: "agent".into(),
+        text: reply.trim().into(),
+        at: now_secs(),
+        by,
+    });
+    let thread = thread.clone();
+    storage::save(&dir, &stored)?;
+    let _ = on_event.send(ThreadEvent::Done { thread });
+    Ok(())
+}
+
+#[tauri::command]
+pub fn delete_thread(st: State<'_, AppState>, project_id: u64, iid: u64, index: usize) -> Result<()> {
+    if st.running.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err(crate::error::AppError::Agent(
+            "Wait for the agent to finish or cancel it first.".into(),
+        ));
+    }
+    let Some(dir) = storage::default_dir() else {
+        return Ok(());
+    };
+    if let Some(mut r) = storage::load_latest(&dir, project_id, iid) {
+        if r.threads.remove(&index).is_some() {
+            storage::save(&dir, &r)?;
+        }
+    }
     Ok(())
 }

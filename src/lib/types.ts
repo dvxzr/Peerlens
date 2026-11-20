@@ -50,7 +50,13 @@ export interface StoredReview {
   usage: Usage | null;
   activity: string[];
   repo: SnapshotStats | null;
+  threads?: Record<string, ThreadMsg[]>;
 }
+export interface ThreadMsg { role: "user" | "agent"; text: string; at: number; by: string }
+export type ThreadEvent =
+  | { type: "text"; text: string }
+  | { type: "usage"; usage: Usage }
+  | { type: "done"; thread: ThreadMsg[] };
 export interface SnapshotStats { files: number; bytes: number; excluded: string[]; skipped_large: number; skipped_links: number }
 export interface UsageWindow { name: string; utilization: number; resets_at: number; status: string }
 export interface Usage { status: string; windows: UsageWindow[] }

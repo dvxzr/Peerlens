@@ -1,5 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import type { UpdateInfo, UpdateProgress, AgentInfo, AgentKind, ReviewEvent, StoredReview, Usage, Commit, Discussion, FileDiff, MrDetails, MrSummary, Settings, User } from "./types";
+import type { UpdateInfo, UpdateProgress, AgentInfo, AgentKind, ReviewEvent, StoredReview, ThreadEvent, Usage, Commit, Discussion, FileDiff, MrDetails, MrSummary, Settings, User } from "./types";
 
 type Id = { projectId: number; iid: number };
 
@@ -18,6 +18,14 @@ export const api = {
   cancelReview: () => invoke<void>("cancel_review"),
   getUsage: () => invoke<Usage | null>("get_usage"),
   deleteReview: (id: Id) => invoke<void>("delete_review", id),
+  discussFinding: (
+    id: Id, index: number, message: string, agent: AgentKind, model: string, effort: string, onEvent: (e: ThreadEvent) => void,
+  ) => {
+    const ch = new Channel<ThreadEvent>();
+    ch.onmessage = onEvent;
+    return invoke<void>("discuss_finding", { ...id, index, message, agent, model, effort, onEvent: ch });
+  },
+  deleteThread: (id: Id, index: number) => invoke<void>("delete_thread", { ...id, index }),
   defaultGuidelines: () => invoke<string>("default_guidelines"),
   appVersion: () => invoke<string>("app_version"),
   checkUpdate: () => invoke<UpdateInfo | null>("check_update"),

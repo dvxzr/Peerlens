@@ -32,6 +32,21 @@ pub struct StoredReview {
     /// Snapshot summary when repo context was used.
     #[serde(default)]
     pub repo: Option<super::repo::SnapshotStats>,
+    /// Discussion threads keyed by finding index.
+    #[serde(default)]
+    pub threads: std::collections::BTreeMap<usize, Vec<ThreadMsg>>,
+}
+
+/// One message in a finding's discussion thread.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct ThreadMsg {
+    /// "user" or "agent".
+    pub role: String,
+    pub text: String,
+    pub at: u64,
+    /// Agent / model that wrote an agent reply, e.g. "Claude / sonnet".
+    #[serde(default)]
+    pub by: String,
 }
 
 pub fn default_dir() -> Option<PathBuf> {

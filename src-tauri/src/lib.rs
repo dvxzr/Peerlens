@@ -51,6 +51,8 @@ pub fn run() {
             commands::cancel_review,
             commands::get_usage,
             commands::delete_review,
+            commands::discuss_finding,
+            commands::delete_thread,
             commands::default_guidelines,
             commands::app_version,
             commands::check_update,

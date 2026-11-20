@@ -5,7 +5,7 @@ A small, fast desktop app for reviewing your GitLab merge requests with an AI ag
 [Codex](https://github.com/openai/codex) through their CLIs and your existing subscription. It talks to GitLab only
 through [`glab`](https://gitlab.com/gitlab-org/cli), and only with read requests.
 
-![Peerlens: MR list, diff with inline findings, AI review panel](docs/screenshot-dark.png)
+![Peerlens: MR list, diff with inline findings, AI review panel with a finding discussion](docs/screenshot-dark.png)
 
 ## Features
 
@@ -15,9 +15,14 @@ through [`glab`](https://gitlab.com/gitlab-org/cli), and only with read requests
   headers, pinned line numbers, collapsed large or generated files.
 - **Commits and discussions.** Per-commit diffs, threads with resolved filter, jump from a comment to its line,
   GitLab Markdown and emoji rendered safely.
-- **AI review.** Pick the agent, model and reasoning effort. Findings stream in with severity, explanation, the
-  problematic snippet and a suggested fix with a Copy button. They are grouped by file and shown inline in the diff.
-  Large MRs are reviewed file by file; lock, binary and generated files are skipped and listed.
+- **AI review.** Pick the agent, model, reasoning effort, scope and language from one compact line. Findings stream
+  in with severity, explanation, the problematic snippet and a suggested fix with a Copy button. They are grouped by
+  file, shown inline in the diff and can be filtered by severity. Large MRs are reviewed file by file; lock, binary
+  and generated files are skipped and listed.
+- **Reviewer notes.** Optionally tell the agent what the change is about and what to focus on or skip. Notes are kept
+  per MR and sent as a separate trusted block; the MR description is already included.
+- **Discuss a finding.** Open a thread under any finding and argue with the agent about it. It sees the finding, the
+  diff of its file and the thread, and can defend, correct or withdraw it. Threads are saved with the review.
 - **Optional repo context.** The agent can read a temporary, read-only snapshot of the repository at the MR head
   to check callers, definitions and tests. The snapshot is deleted after the review.
 - **Editable review prompt.** Change what the reviewer checks in Settings, or reset to the built-in prompt. The

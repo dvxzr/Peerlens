@@ -28,11 +28,11 @@ export const api = {
   },
   startReview: (
     id: Id, agent: AgentKind, model: string, effort: string, scopeFile: string | null, language: string, repoContext: boolean,
-    onEvent: (e: ReviewEvent) => void,
+    notes: string, onEvent: (e: ReviewEvent) => void,
   ) => {
     const ch = new Channel<ReviewEvent>();
     ch.onmessage = onEvent;
-    return invoke<void>("start_review", { ...id, agent, model, effort, scopeFile, language, repoContext, onEvent: ch });
+    return invoke<void>("start_review", { ...id, agent, model, effort, scopeFile, language, repoContext, notes, onEvent: ch });
   },
 };
 

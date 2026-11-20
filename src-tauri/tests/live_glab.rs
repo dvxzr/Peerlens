@@ -71,7 +71,7 @@ async fn live_claude_review() {
         // PEERLENS_LIVE_MODEL=sonnet to check review quality; haiku/low keeps the smoke test cheap.
         model: Some(std::env::var("PEERLENS_LIVE_MODEL").unwrap_or_else(|_| "haiku".into())),
         effort: std::env::var("PEERLENS_LIVE_MODEL").is_err().then(|| "low".into()),
-        system_prompt: prompt::system_prompt("English", AgentKind::Claude, snap.is_some(), ""),
+        system_prompt: prompt::system_prompt("English", AgentKind::Claude, snap.is_some(), "", ""),
         timeout: std::time::Duration::from_secs(300),
         repo: snap.as_ref().map(|s| s.root().to_path_buf()),
         known_features: None,
@@ -154,7 +154,13 @@ async fn live_codex_argv_accepted() {
             bin: bin.clone(),
             model: Some(probe.models[0].slug.clone()),
             effort: Some("low".into()),
-            system_prompt: peerlens_lib::review::prompt::system_prompt("English", AgentKind::Codex, repo.is_some(), ""),
+            system_prompt: peerlens_lib::review::prompt::system_prompt(
+                "English",
+                AgentKind::Codex,
+                repo.is_some(),
+                "",
+                "",
+            ),
             timeout: std::time::Duration::from_secs(120),
             repo: repo.as_ref().map(|r| r.0.clone()),
             known_features: Some(probe.features.clone()),

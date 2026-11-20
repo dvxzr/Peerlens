@@ -60,13 +60,13 @@ export function get(pid: number, iid: number): ReviewState | undefined {
 
 export async function start(
   pid: number, iid: number, agent: AgentKind, model: string, effort: string, scopeFile: string | null, language: string,
-  repoContext: boolean,
+  repoContext: boolean, notes: string,
 ) {
   const k = key(pid, iid);
   reviews[k] = { ...empty(), running: true };
   const s = reviews[k];
   try {
-    await api.startReview({ projectId: pid, iid }, agent, model, effort, scopeFile, language, repoContext, (e) => {
+    await api.startReview({ projectId: pid, iid }, agent, model, effort, scopeFile, language, repoContext, notes, (e) => {
       switch (e.type) {
         case "started": s.skipped = e.skipped; break;
         case "progress": s.progress = { chunk: e.chunk, total: e.total, files: e.files }; break;

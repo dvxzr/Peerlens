@@ -4,8 +4,9 @@
   import { start, get, usage, loadUsage, remove } from "../lib/review.svelte";
   import { api } from "../lib/api";
   import { ago } from "../lib/time";
-  import { onMount } from "svelte";
-  import { fly, fade, slide } from "svelte/transition";
+  import { onMount, tick } from "svelte";
+  import { pref, setPref } from "../lib/prefs";
+  import { fly, fade, slide, scale } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import Menu from "./Menu.svelte";
   import Icon from "./Icon.svelte";
@@ -69,20 +70,63 @@
   let stale = $derived(!!r && !r.running && !!r.headSha && !!headSha && r.headSha !== headSha);
   const sevOrder: Record<string, number> = { critical: 0, major: 1, minor: 2, nit: 3 };
 
+  // Severity filter; reset when a new review no longer has that severity.
+  let sev = $state<string | null>(null);
   let grouped = $derived.by(() => {
     const m = new Map<string, { f: Finding; i: number }[]>();
     (r?.findings ?? []).forEach((f, i) => {
-      if (!f.anchored) return;
+      if (!f.anchored || (sev && f.severity !== sev)) return;
       (m.get(f.file) ?? m.set(f.file, []).get(f.file)!).push({ f, i });
     });
     for (const v of m.values()) v.sort((a, b) => (a.f.start_line ?? 0) - (b.f.start_line ?? 0));
     return [...m.entries()];
   });
-  let unanchored = $derived((r?.findings ?? []).map((f, i) => ({ f, i })).filter((x) => !x.f.anchored));
+  let unanchored = $derived((r?.findings ?? []).map((f, i) => ({ f, i })).filter((x) => !x.f.anchored && (!sev || x.f.severity === sev)));
   let counts = $derived(
     Object.entries((r?.findings ?? []).reduce((a, f) => ((a[f.severity] = (a[f.severity] ?? 0) + 1), a), {} as Record<string, number>))
       .sort(([a], [b]) => (sevOrder[a] ?? 9) - (sevOrder[b] ?? 9)),
   );
+
+  $effect(() => {
+    if (sev && !counts.some(([s]) => s === sev)) sev = null;
+  });
+
+  // Optional reviewer notes, remembered per MR (the panel is reused when switching MRs).
+  const MAX_NOTES = 4000; // keep in sync with review::prompt::MAX_NOTES
+  let notesKey = $derived(`notes.${projectId}:${iid}`);
+  let notes = $state("");
+  let notesOpen = $state(false);
+  let notesEl: HTMLTextAreaElement | undefined = $state();
+  $effect(() => {
+    notes = pref<string>(notesKey, "") ?? "";
+    notesOpen = false;
+  });
+  const saveNotes = () => setPref(notesKey, notes);
+  async function editNotes() {
+    notesOpen = true;
+    await tick();
+    notesEl?.focus();
+  }
+  function addNote(line: string) {
+    if (notes.includes(line)) return;
+    notes = (notes.trimEnd() ? notes.trimEnd() + "\n" : "") + line;
+    saveNotes();
+    notesEl?.focus();
+  }
+  function notesBlur(e: FocusEvent) {
+    if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) notesOpen = false;
+  }
+
+  let showMore = $state(false);
+  let moreEl: HTMLDivElement | undefined = $state();
+  $effect(() => {
+    if (!showMore) return;
+    const h = (e: PointerEvent) => !moreEl?.contains(e.target as Node) && (showMore = false);
+    const k = (e: KeyboardEvent) => e.key === "Escape" && (showMore = false);
+    window.addEventListener("pointerdown", h, true);
+    window.addEventListener("keydown", k);
+    return () => { window.removeEventListener("pointerdown", h, true); window.removeEventListener("keydown", k); };
+  });
 
   onMount(loadUsage);
   const winLabel = (n: string) => ({ five_hour: "5-hour", seven_day: "Weekly", seven_day_opus: "Weekly Opus" })[n] ?? n.replaceAll("_", " ");
@@ -90,11 +134,13 @@
     const m = Math.max(0, Math.round((ts * 1000 - Date.now()) / 60000));
     return m >= 60 * 24 ? `${Math.round(m / 1440)}d` : m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
   };
+  // The most-used limit that hasn't reset yet; shown as one line under the Review button.
+  let worst = $derived(usage.value?.windows.filter((w) => w.resets_at * 1000 > Date.now()).sort((a, b) => b.utilization - a.utilization)[0]);
   let overLimit = $derived(agent === "claude" && !!usage.value?.windows.some((w) => w.utilization * 100 >= settings.max_usage_pct && w.resets_at * 1000 > Date.now()));
 
   function run() {
     if (r?.running || (scope === "file" && !currentFile) || overLimit || codexNotLoggedIn) return;
-    start(projectId, iid, agent, model, effort, scope === "file" ? currentFile : null, language, repoContext);
+    start(projectId, iid, agent, model, effort, scope === "file" ? currentFile : null, language, repoContext, notes.trim());
   }
   function keys(e: KeyboardEvent) {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); run(); }
@@ -165,60 +211,97 @@
 <svelte:window onkeydown={keys} />
 <div class="panel">
   <div class="controls">
-    <div class="ptitle"><Icon name="sparkles" size={15} />AI review</div>
     {#if agents.length === 0}
       <div class="warn"><Icon name="alert" size={14} />No agent found. Install Claude Code or Codex, or set the path in Settings.</div>
     {:else}
-      <div class="row three">
-        <Menu items={agentItems} value={agent} onselect={pickAgent} title="Agent" width={280} label={agent === "claude" ? "Claude" : "Codex"} />
-        <Menu items={modelItems} value={model} onselect={(v) => (model = v)} title="Model" align="right" width={290}>
-          {#snippet footer(close)}
-            <form class="custom" onsubmit={(e) => { e.preventDefault(); if (customModel.trim()) { model = customModel.trim(); customModel = ""; close(); } }}>
-              <input bind:value={customModel} placeholder="Custom model id…" spellcheck="false" />
-              <button type="submit" class="primary">Use</button>
-            </form>
-          {/snippet}
-        </Menu>
-        <Menu items={effortItems} value={effort} onselect={(v) => (effort = v)} title="Reasoning effort" align="right" width={270}
-          label={effort ? effortItems.find((x) => x.value === effort)?.label : "Effort"} />
-      </div>
-      <div class="row">
-        <Menu items={scopeItems} value={scope} onselect={(v) => (scope = v)} title="What to review" width={260} />
-        <Menu items={langItems} value={language} onselect={(v) => (language = v)} title="Language of the review text" align="right" />
-      </div>
-      <button class="toggle" class:on={repoContext} onclick={() => (repoContext = !repoContext)} role="switch" aria-checked={repoContext}>
-        <span class="sw"><span class="knob"></span></span>
-        <span class="tt">
-          <span class="tl"><Icon name="folder" size={14} />Repo context</span>
-          <span class="td">{repoContext
-            ? "Agent may read a snapshot of the repo at the MR head (read-only, secrets removed, deleted after). Uses more of your limits."
-            : "Agent sees only the diff."}</span>
-          {#if repoContext && agent === "codex"}
-            <span class="td warnline">Codex reads code with shell commands in a read-only, offline sandbox. Unlike Claude it can't be limited to the snapshot folder; the prompt forbids reading elsewhere.</span>
-          {/if}
-        </span>
-      </button>
-      {#if agent === "claude" && usage.value?.windows.length}
-        <div class="usage" title="Your Claude subscription usage, as reported by Claude Code">
-          {#each usage.value.windows as w (w.name)}
-            {@const pct = Math.round(w.utilization * 100)}
-            <div class="uw">
-              <span class="ul">{winLabel(w.name)}</span>
-              <span class="bar"><span class="fill" class:hot={pct >= settings.max_usage_pct} class:warm={pct >= settings.max_usage_pct * 0.7} style:width="{Math.min(100, pct)}%"></span></span>
-              <span class="up mono">{pct}%</span>
-              <span class="ur dim">resets in {resetIn(w.resets_at)}</span>
-            </div>
-          {/each}
+      <div class="run">
+        <div class="cfg">
+          <Menu items={agentItems} value={agent} onselect={pickAgent} title="Agent" width={280} label={agent === "claude" ? "Claude" : "Codex"} />
+          <Menu items={modelItems} value={model} onselect={(v) => (model = v)} title="Model" width={290}>
+            {#snippet footer(close)}
+              <form class="custom" onsubmit={(e) => { e.preventDefault(); if (customModel.trim()) { model = customModel.trim(); customModel = ""; close(); } }}>
+                <input bind:value={customModel} placeholder="Custom model id…" spellcheck="false" />
+                <button type="submit" class="primary">Use</button>
+              </form>
+            {/snippet}
+          </Menu>
+          <Menu items={effortItems} value={effort} onselect={(v) => (effort = v)} title="Reasoning effort" width={270}
+            label={effort ? effortItems.find((x) => x.value === effort)?.label : "Auto effort"} />
+          <Menu items={scopeItems} value={scope} onselect={(v) => (scope = v)} title="What to review" align="right" width={260} />
+          <Menu items={langItems} value={language} onselect={(v) => (language = v)} title="Language of the review text" align="right" />
+          {#if repoContext}<span class="rc" title="Repo context is on"><Icon name="folder" size={13} /></span>{/if}
         </div>
-      {/if}
-      <div class="row actions">
-        {#if r?.running}
-          <button class="stopbtn" onclick={() => api.cancelReview()}><Icon name="stop" size={14} />Cancel</button>
-          <span class="prog dim">{r.repoStage === "downloading" ? "Downloading repo…" : r.progress ? `Part ${r.progress.chunk} of ${r.progress.total}` : "Starting…"}</span>
+        {#if notesOpen}
+          <div class="notes" role="group" aria-label="Reviewer notes" onfocusout={notesBlur}>
+            <textarea bind:this={notesEl} onkeydown={(e) => e.key === "Escape" && (notesOpen = false)} bind:value={notes} oninput={saveNotes} rows="3" maxlength={MAX_NOTES} spellcheck="false"
+              placeholder="Task description, what to focus on, what to skip…"></textarea>
+            <div class="nbar">
+              <button class="nchip" onclick={() => addNote("Focus on security.")}>+ security</button>
+              <button class="nchip" onclick={() => addNote("Check that tests cover the change.")}>+ tests</button>
+              <button class="nchip" onclick={() => addNote("Skip nits and style.")}>− skip nits</button>
+              <span class="ncount mono">{notes.length} / {MAX_NOTES}</span>
+            </div>
+            <div class="nhint"><Icon name="message" size={12} />MR title and description are already included.</div>
+          </div>
+        {:else if notes.trim()}
+          <div class="nprev">
+            <button class="nquote" onclick={editNotes} title="Edit notes">{notes.trim()}</button>
+            <button class="ghost icon nclear" onclick={() => { notes = ""; saveNotes(); }} title="Clear notes"><Icon name="x" size={13} /></button>
+          </div>
         {:else}
-          <button class="primary go" onclick={run} disabled={(scope === "file" && !currentFile) || overLimit || codexNotLoggedIn}
-            title={overLimit ? `Paused: usage is over ${settings.max_usage_pct}%` : `Run a read-only review (${kb("↵")})`}>
-            <Icon name="sparkles" size={15} />Review<kbd>{kb("↵")}</kbd>
+          <button class="nadd" onclick={editNotes}><Icon name="message" size={13} />Add context for the reviewer <span class="dim">(optional)</span></button>
+        {/if}
+        <div class="act">
+          {#if r?.running}
+            <button class="stopbtn" onclick={() => api.cancelReview()}><Icon name="stop" size={14} />Cancel</button>
+            <span class="prog dim">{r.repoStage === "downloading" ? "Downloading repo…" : r.progress ? `Part ${r.progress.chunk} of ${r.progress.total}` : "Starting…"}</span>
+          {:else}
+            <button class="primary go" onclick={run} disabled={(scope === "file" && !currentFile) || overLimit || codexNotLoggedIn}
+              title={overLimit ? `Paused: usage is over ${settings.max_usage_pct}%` : `Run a read-only review (${kb("↵")})`}>
+              <Icon name="sparkles" size={15} />{r?.createdAt ? "Re-review" : "Review"}<kbd>{kb("↵")}</kbd>
+            </button>
+          {/if}
+          <div class="more" bind:this={moreEl}>
+            <button class="icon gear" class:open={showMore} onclick={() => (showMore = !showMore)} title="More options" aria-expanded={showMore}>
+              <Icon name="settings" size={15} />
+            </button>
+            {#if showMore}
+              <div class="morepop" transition:scale={{ start: 0.96, duration: 130, easing: cubicOut }}>
+                <button class="toggle" class:on={repoContext} onclick={() => (repoContext = !repoContext)} role="switch" aria-checked={repoContext}>
+                  <span class="sw"><span class="knob"></span></span>
+                  <span class="tt">
+                    <span class="tl"><Icon name="folder" size={14} />Repo context</span>
+                    <span class="td">{repoContext
+                      ? "Agent may read a snapshot of the repo at the MR head (read-only, secrets removed, deleted after). Uses more of your limits."
+                      : "Agent sees only the diff."}</span>
+                    {#if repoContext && agent === "codex"}
+                      <span class="td warnline">Codex reads code with shell commands in a read-only, offline sandbox. Unlike Claude it can't be limited to the snapshot folder; the prompt forbids reading elsewhere.</span>
+                    {/if}
+                  </span>
+                </button>
+                {#if agent === "claude" && usage.value?.windows.length}
+                  <div class="usage" title="Your Claude subscription usage, as reported by Claude Code">
+                    {#each usage.value.windows as w (w.name)}
+                      {@const pct = Math.round(w.utilization * 100)}
+                      <div class="uw">
+                        <span class="ul">{winLabel(w.name)}</span>
+                        <span class="bar"><span class="fill" class:hot={pct >= settings.max_usage_pct} class:warm={pct >= settings.max_usage_pct * 0.7} style:width="{Math.min(100, pct)}%"></span></span>
+                        <span class="up mono">{pct}%</span>
+                        <span class="ur dim">resets in {resetIn(w.resets_at)}</span>
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+            {/if}
+          </div>
+        </div>
+        {#if agent === "claude" && worst}
+          {@const pct = Math.round(worst.utilization * 100)}
+          <button class="uline" onclick={() => (showMore = true)} title="Claude usage: all limits in More options">
+            <Icon name="gauge" size={12} /><span class="dim">{winLabel(worst.name)}</span>
+            <span class="bar"><span class="fill" class:hot={pct >= settings.max_usage_pct} class:warm={pct >= settings.max_usage_pct * 0.7} style:width="{Math.min(100, pct)}%"></span></span>
+            <span class="mono">{pct}%</span><span class="dim">· {resetIn(worst.resets_at)}</span>
           </button>
         {/if}
       </div>
@@ -231,7 +314,6 @@
       {#if r?.running}<div class="indet" transition:fade={{ duration: 150 }}><span></span></div>{/if}
     {/if}
   </div>
-
   <div class="results">
     {#if r && (r.createdAt || r.running)}
       <div class="meta">
@@ -255,7 +337,12 @@
         </details>
       {/if}
       {#if counts.length}
-        <div class="counts">{#each counts as [s, n] (s)}<span class="sev sev-{s}">{n} {s}</span>{/each}</div>
+        <div class="tabs" role="tablist">
+          <button class:on={!sev} role="tab" aria-selected={!sev} onclick={() => (sev = null)}>All <span class="dim">{r.findings.length}</span></button>
+          {#each counts as [s, n] (s)}
+            <button class:on={sev === s} role="tab" aria-selected={sev === s} onclick={() => (sev = s)} title={s}><i class="dot sevd-{s}"></i>{n} <span class="dim">{s}</span></button>
+          {/each}
+        </div>
       {/if}
       {#each r.errors as e, i (i)}<div class="warn" transition:slide={{ duration: 160 }}><Icon name="alert" size={14} /><span>{e}</span></div>{/each}
       {#each grouped as [file, items] (file)}
@@ -296,17 +383,58 @@
   .panel { display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; background: var(--bg0); }
   .controls { flex: none; }
   .results { min-height: 0; }
-  .controls { padding: 12px 14px 12px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; position: relative; }
-  .ptitle { display: flex; align-items: center; gap: 7px; font-weight: 650; font-size: 13px; margin-bottom: 2px; }
-  .ptitle :global(svg) { color: var(--accent); }
-  .row { display: flex; gap: 6px; align-items: center; min-width: 0; }
-  .row > :global(.menu) { flex: 1 1 0; min-width: 0; }
-  .row.three > :global(.menu .trigger) { padding-left: 8px; padding-right: 7px; gap: 6px; }
-  .row > :global(.menu .trigger) { width: 100%; justify-content: flex-start; }
-  .row > :global(.menu .trigger .lbl) { flex: 1; text-align: left; }
+  .controls { padding: 10px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; position: relative; }
+  .run {
+    display: flex; flex-direction: column; gap: 9px; padding: 9px 10px 10px; border-radius: 12px;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 14%, transparent), color-mix(in srgb, var(--accent) 4%, transparent));
+    border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+  }
+  /* Summary line: each Menu renders as a flat, clickable word. */
+  .cfg { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-width: 0; }
+  .cfg :global(.menu .trigger) { background: transparent; border-color: transparent; padding: 2px 6px; gap: 5px; font-size: 12px; color: var(--text2); border-radius: 6px; }
+  .cfg :global(.menu .trigger:hover), .cfg :global(.menu .trigger.open) { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
+  .cfg :global(.menu .trigger.open) { box-shadow: inset 0 0 0 1px var(--accent); }
+  .cfg :global(.menu .trigger svg:first-child) { width: 13px; height: 13px; }
+  .cfg :global(.menu .trigger .chev) { display: none; }
+  .cfg :global(.menu:first-child .trigger .lbl) { color: var(--text); }
+  .rc { display: inline-flex; padding: 2px 5px; color: var(--accent); }
+  .nadd { justify-content: flex-start; gap: 6px; padding: 2px 4px; border: none; background: transparent; color: var(--text3); font-size: 12px; }
+  .nadd:hover:not(:disabled) { background: transparent; color: var(--text); }
+  .nadd:active:not(:disabled) { transform: none; }
+  .notes { display: flex; flex-direction: column; gap: 6px; }
+  .notes textarea { width: 100%; resize: vertical; min-height: 64px; max-height: 240px; font-size: 12px; line-height: 1.5; background: var(--bg1); border-color: var(--border2); }
+  .notes textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+  .nbar { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+  .nchip { padding: 1px 8px; border-radius: 999px; font-size: 11px; background: transparent; border-color: var(--border2); color: var(--text2); }
+  .nchip:hover:not(:disabled) { background: transparent; border-color: var(--accent); color: var(--accent); }
+  .ncount { margin-left: auto; font-size: 10.5px; color: var(--text3); }
+  .nhint { display: flex; gap: 5px; align-items: center; font-size: 11px; color: var(--text3); }
+  .nprev { display: flex; gap: 4px; align-items: flex-start; }
+  .nquote {
+    flex: 1; min-width: 0; justify-content: flex-start; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11.5px; color: var(--text2);
+    padding: 5px 8px; border: none; border-left: 2px solid var(--accent); border-radius: 0 6px 6px 0; background: color-mix(in srgb, var(--accent) 6%, transparent);
+    display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .nquote:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .nquote:active:not(:disabled) { transform: none; }
+  .nclear { width: 24px; height: 24px; color: var(--text3); }
+  .act { display: flex; gap: 6px; align-items: center; }
+  .more { position: relative; flex: none; }
+  .gear { width: 34px; height: 34px; padding: 0; }
+  .gear.open { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+  .morepop {
+    position: absolute; top: calc(100% + 6px); right: 0; z-index: 50; width: min(320px, 80vw); transform-origin: top right;
+    background: var(--bg2); border-radius: 12px; box-shadow: var(--shadow); padding: 6px; display: flex; flex-direction: column; gap: 6px;
+  }
+  .morepop .toggle { background: transparent; border-color: transparent; }
+  .morepop .toggle:hover { background: var(--bg3); }
+  .uline { justify-content: flex-start; gap: 6px; padding: 0 2px; border: none; background: transparent; font-size: 11px; }
+  .uline:hover:not(:disabled) { background: transparent; }
+  .uline:active:not(:disabled) { transform: none; }
+  .uline :global(svg) { color: var(--text3); flex: none; }
+  .uline .bar { flex: 1; }
   .custom { display: flex; gap: 6px; }
   .custom input { flex: 1; min-width: 0; height: 30px; }
-  .actions { margin-top: 2px; }
   .go { flex: 1; height: 34px; font-size: 13.5px; }
   kbd { font: 500 10.5px var(--mono); opacity: .65; margin-left: 4px; }
   .note-warn { display: flex; gap: 7px; align-items: flex-start; font-size: 11.5px; color: var(--orange); line-height: 1.4; }
@@ -347,7 +475,16 @@
   .del { margin-left: auto; padding: 2px 8px; font-size: 11.5px; gap: 5px; color: var(--text3); }
   .del:hover:not(:disabled) { color: var(--red); }
   .del.confirm { color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); }
-  .counts { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+  .tabs { display: flex; gap: 2px; margin: 0 -2px 8px; border-bottom: 1px solid var(--border); overflow-x: auto; }
+  .tabs button {
+    border: none; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; padding: 5px 8px; gap: 5px;
+    font-size: 12px; color: var(--text2); white-space: nowrap;
+  }
+  .tabs button:hover:not(:disabled) { background: transparent; color: var(--text); }
+  .tabs button:active:not(:disabled) { transform: none; }
+  .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text3); }
+  .sevd-critical { background: var(--red); } .sevd-major { background: var(--orange); } .sevd-minor { background: var(--yellow); }
   .group { display: flex; align-items: center; gap: 6px; font-weight: 600; margin: 14px 0 6px; font-size: 12px; color: var(--text2); overflow-wrap: anywhere; }
   .group :global(svg) { color: var(--text3); flex: none; }
   .card {

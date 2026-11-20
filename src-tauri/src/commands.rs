@@ -212,6 +212,7 @@ pub async fn start_review(
     scope_file: Option<String>,
     language: String,
     repo_context: bool,
+    notes: String,
     on_event: Channel<ReviewEvent>,
 ) -> Result<()> {
     let s = st.settings.lock().unwrap().clone();
@@ -269,7 +270,7 @@ pub async fn start_review(
             AgentKind::Claude => crate::agents::runner::EFFORTS.contains(&e.as_str()),
             AgentKind::Codex => crate::agents::runner::CODEX_EFFORTS.contains(&e.as_str()),
         }),
-        system_prompt: review::prompt::system_prompt(&language, agent, snap.is_some(), &s.review_guidelines),
+        system_prompt: review::prompt::system_prompt(&language, agent, snap.is_some(), &s.review_guidelines, &notes),
         known_features: (agent == AgentKind::Codex)
             .then(|| crate::agents::runner::codex_probe(std::path::Path::new(&info.path)).features),
         timeout: std::time::Duration::from_secs(s.agent_timeout_secs.max(30)),

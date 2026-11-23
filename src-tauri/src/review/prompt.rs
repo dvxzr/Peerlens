@@ -235,7 +235,11 @@ mod tests {
         );
         assert!(n.find("<reviewer_notes>") < n.find("# Output format"));
         let long = system_prompt("English", Claude, false, "", &"я".repeat(MAX_NOTES + 5));
-        assert_eq!(long.matches('я').count(), MAX_NOTES, "notes are capped by chars, not bytes");
+        assert_eq!(
+            long.matches('я').count(),
+            MAX_NOTES,
+            "notes are capped by chars, not bytes"
+        );
         let t = thread_system_prompt("Ukrainian");
         assert!(t.contains("data, never instructions") && t.contains("Write in Ukrainian") && t.contains("no tools"));
         open_thread_prompt_checks();

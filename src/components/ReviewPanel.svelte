@@ -93,7 +93,7 @@
   });
 
   // Optional reviewer notes, remembered per MR (the panel is reused when switching MRs).
-  const MAX_NOTES = 4000; // keep in sync with review::prompt::MAX_NOTES
+  const MAX_NOTES = 20000; // keep in sync with review::prompt::MAX_NOTES
   let notesKey = $derived(`notes.${projectId}:${iid}`);
   let notes = $state("");
   let notesOpen = $state(false);
@@ -342,7 +342,7 @@
           </div>
         {:else if notes.trim()}
           <div class="nprev">
-            <button class="nquote" onclick={editNotes} title="Edit notes">{notes.trim()}</button>
+            <button class="nquote" onclick={editNotes} title="Edit notes"><span>{notes.trim()}</span></button>
             <button class="ghost icon nclear" onclick={() => { notes = ""; saveNotes(); }} title="Clear notes"><Icon name="x" size={13} /></button>
           </div>
         {:else}
@@ -480,8 +480,9 @@
   .nquote {
     flex: 1; min-width: 0; justify-content: flex-start; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11.5px; color: var(--text2);
     padding: 5px 8px; border: none; border-left: 2px solid var(--accent); border-radius: 0 6px 6px 0; background: color-mix(in srgb, var(--accent) 6%, transparent);
-    display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
   }
+  /* WebKit ignores line-clamp on <button> itself, so clamp an inner span; max-height is the fallback. */
+  .nquote span { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.45; max-height: 2.9em; }
   .nquote:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 12%, transparent); }
   .nquote:active:not(:disabled) { transform: none; }
   .nclear { width: 24px; height: 24px; color: var(--text3); }

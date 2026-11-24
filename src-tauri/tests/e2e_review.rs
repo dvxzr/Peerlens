@@ -133,12 +133,18 @@ async fn cancel_kills_process_tree_quickly() {
     assert_eq!(r.findings.len(), 1, "finding before cancel is kept");
     let log = std::fs::read_to_string(format!("{}.slow", log_base())).unwrap();
     let pid = log.lines().find_map(|l| l.strip_prefix("pid: ")).unwrap();
-    // The shell's child `sleep 30` is in the same group; the whole group must be gone
-    // (allow a moment for orphaned zombies to be reaped).
+    // The shell's child `sleep 30` is in the same group; no live member may remain. Zombies are
+    // already dead: their reaping is up to whoever adopted them (slow on some CI runners).
     let gone = (0..20).any(|_| {
         std::thread::sleep(Duration::from_millis(100));
-        let out = std::process::Command::new("pgrep").args(["-g", pid]).output().unwrap();
-        String::from_utf8_lossy(&out.stdout).trim().is_empty()
+        let out = std::process::Command::new("ps")
+            .args(["-A", "-o", "pgid=,stat="])
+            .output()
+            .unwrap();
+        !String::from_utf8_lossy(&out.stdout).lines().any(|l| {
+            let mut f = l.split_whitespace();
+            f.next() == Some(pid) && !f.next().unwrap_or("Z").starts_with('Z')
+        })
     });
     assert!(gone, "group {pid} still alive");
 }

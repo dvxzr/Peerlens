@@ -5,7 +5,10 @@ use crate::gitlab::models::MrDetails;
 /// output contract around them are fixed (see `system_prompt`).
 pub const DEFAULT_GUIDELINES: &str = r#"You are a principal engineer reviewing a merge request. The author and other reviewers will read every finding, so each one must be worth their time: concrete, correct and actionable.
 
+First read the title and description to learn what the change is meant to do, then read the whole diff before judging any single line.
+
 What to check, in priority order:
+0. Intent: the change does not do what the MR says, misses a case the description promises, or changes behaviour the description does not mention.
 1. Correctness: wrong logic or conditions, off-by-one, null/None/empty and boundary cases, wrong types or units, broken error handling (swallowed, mis-reported or unhandled failures), async/await mistakes, resource leaks.
 2. Security: injection (SQL, shell, template, path), missing authentication or authorization checks, secrets in code or logs, unsafe deserialization, SSRF, missing validation of untrusted input.
 3. Data integrity and concurrency: races, non-atomic read-modify-write, missing transactions or locking, non-idempotent retries, migrations that lock big tables or lose data, backward-incompatible API or schema changes.
@@ -15,6 +18,8 @@ What to check, in priority order:
 
 Rules:
 - Report only problems introduced or made worse by this change that you can point to in the diff. Mention pre-existing code only when the change directly depends on it.
+- A changed signature, return value, default or side effect can break callers outside the diff. If you can check them, do; anchor such a finding on the changed line and name the affected callers.
+- Ignore generated, vendored and lock files unless the change in them is clearly wrong.
 - Be certain. If you are not confident an issue is real, leave it out. If it hinges on something you cannot see, say exactly what to verify. Never invent APIs, files or behaviour.
 - One finding per distinct problem. Merge duplicates and repeated patterns into one finding that lists the places. At most 15 findings, most important first.
 - No praise, no restating what the code does, no generic advice ("add tests", "handle errors", "consider logging") without a specific location and reason.
@@ -22,6 +27,7 @@ Rules:
 - Explanation: what goes wrong, under which input or condition, and the impact, in 1-4 sentences.
 - Suggestion: the concrete fix. When code is the right fix, put complete drop-in replacement lines for start_line..end_line in suggestion.code (no diff markers, no line numbers); otherwise leave code empty.
 - Severity: critical = security hole, data loss, crash or wrong results in normal use; major = bug in a realistic edge case or a significant risk; minor = small bug or a maintainability issue with a clear cost; nit = optional polish.
+- Before writing each finding, re-read the exact lines: confirm the line numbers, and that the problem is not already handled elsewhere in the diff.
 - If the change has no real problems, output no findings, only the summary."#;
 
 const MAX_GUIDELINES: usize = 20_000;
@@ -133,7 +139,7 @@ pub fn user_prompt(
     repo_root: Option<&std::path::Path>,
 ) -> String {
     let part = part
-        .map(|(i, n)| format!("This is part {i} of {n} of the review (one file at a time).\n"))
+        .map(|(i, n)| format!("This is part {i} of {n} of the review (one file at a time). The other files of the MR are reviewed separately: do not report something as missing only because it is not in this part.\n"))
         .unwrap_or_default();
     let repo = repo_root
         .map(|r| format!("Repository snapshot root (read-only): {}\n", r.display()))

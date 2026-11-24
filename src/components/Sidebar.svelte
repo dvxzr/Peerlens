@@ -11,10 +11,17 @@
     selected: MrSummary | null; onselect: (m: MrSummary) => void; onrefresh: () => void; onsettings: () => void; onhide: () => void;
   } = $props();
 
+  // Re-render relative times ("updated 3 minutes ago") while the list sits idle.
+  let now = $state(Date.now());
+  $effect(() => {
+    const t = setInterval(() => (now = Date.now()), 30_000);
+    return () => clearInterval(t);
+  });
+
   let q = $state("");
   // Groups are collapsed by default; the ones you open are remembered.
   let expanded = $state(new Set<string>(pref<string[]>("expandedProjects", [])));
-  const isOpen = (p: string) => expanded.has(p) || !!q.trim() || (!!selected && project(selected) === p);
+  const isOpen = (p: string) => expanded.has(p) || !!q.trim();
   const project = (m: MrSummary) => m.references.full.replace(/!\d+$/, "") || `project ${m.project_id}`;
   const short = (p: string) => p.split("/").slice(-2).join("/");
 
@@ -29,9 +36,10 @@
     }
     return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
   });
-  function fold(p: string) {
+  function fold(p: string, open = !expanded.has(p)) {
+    if (open === expanded.has(p)) return;
     const s = new Set(expanded);
-    s.has(p) ? s.delete(p) : s.add(p);
+    open ? s.add(p) : s.delete(p);
     expanded = s;
     setPref("expandedProjects", [...s]);
   }
@@ -57,7 +65,7 @@
     {#if q}<button class="ghost clear" onclick={() => (q = "")} title="Clear"><Icon name="x" size={13} /></button>{/if}
   </div>
   <div class="status dim">
-    {#if loading}Refreshing…{:else if refreshedAt}{mrs.length} open · updated {ago(refreshedAt)}{:else}Not loaded yet{/if}
+    {#if loading}Refreshing…{:else if refreshedAt}{mrs.length} open · updated {ago(refreshedAt, now)}{:else}Not loaded yet{/if}
   </div>
   {#if error}<div class="error"><Icon name="alert" size={14} /><span>{error}</span></div>{/if}
   <div class="list">
@@ -74,7 +82,7 @@
       {#if isOpen(proj)}
         {#each items as m (m.project_id + ":" + m.iid)}
           {@const sel = selected?.project_id === m.project_id && selected?.iid === m.iid}
-          <button class="mr" class:sel onclick={() => onselect(m)}>
+          <button class="mr" class:sel onclick={() => { fold(proj, true); onselect(m); }}>
             <div class="top">
               <Icon name="mr" size={15} class="micon {m.draft ? 'draft' : ''}" />
               <span class="title">{m.title.replace(/^Draft:\s*/i, "")}</span>
@@ -83,7 +91,7 @@
               <span class="mono iid">!{m.iid}</span>
               <span class="who">{m.author.username}</span>
               <span class="dot">·</span>
-              <span>{ago(m.updated_at)}</span>
+              <span>{ago(m.updated_at, now)}</span>
             </div>
             <div class="tags">
               {#if m.draft}<span class="pill draft">Draft</span>{/if}

@@ -31,17 +31,41 @@ pub async fn my_mrs(g: &Glab, me: &User) -> Result<Vec<MrSummary>> {
     Ok(merge_roles(assigned, reviewing))
 }
 
-/// Mine (with role flags) plus every other open MR visible to me.
+/// Mine (with role flags) plus other open MRs in my top-level groups (subgroups included).
+/// Group-scoped on purpose: instance-wide `merge_requests?scope=all&order_by=updated_at` times out on big instances.
 pub async fn all_mrs(g: &Glab, me: &User) -> Result<Vec<MrSummary>> {
-    // shortcut: one page = the 100 most recently updated open MRs instance-wide; paginate if that proves too few.
-    let all_ep = "merge_requests?scope=all&state=opened&order_by=updated_at&per_page=100";
-    let (mut out, rest) = tokio::try_join!(my_mrs(g, me), get::<Vec<MrSummary>>(g, all_ep, false))?;
+    let (mut out, rest) = tokio::try_join!(my_mrs(g, me), group_mrs(g))?;
     for m in rest {
         if !out.iter().any(|o| (o.project_id, o.iid) == (m.project_id, m.iid)) {
             out.push(m);
         }
     }
     out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    Ok(out)
+}
+
+/// shortcut: one page (100 most recently updated) per group; paginate if that proves too few.
+async fn group_mrs(g: &Glab) -> Result<Vec<MrSummary>> {
+    #[derive(serde::Deserialize)]
+    struct Group {
+        id: u64,
+    }
+    let groups: Vec<Group> = get(g, "groups?min_access_level=10&top_level_only=true&per_page=100", false).await?;
+    let mut set = tokio::task::JoinSet::new();
+    for gr in groups {
+        let g = g.clone();
+        set.spawn(async move {
+            let ep = format!(
+                "groups/{}/merge_requests?state=opened&order_by=updated_at&per_page=100",
+                gr.id
+            );
+            get::<Vec<MrSummary>>(&g, &ep, false).await
+        });
+    }
+    let mut out = Vec::new();
+    while let Some(r) = set.join_next().await {
+        out.extend(r.map_err(std::io::Error::from)??);
+    }
     Ok(out)
 }
 

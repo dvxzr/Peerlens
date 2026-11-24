@@ -67,7 +67,7 @@
   <div class="status dim">
     <div class="seg" role="group" aria-label="Which merge requests">
       <button class:on={!showAll} disabled={loading} onclick={() => showAll && onscope(false)} title="Assigned to me or I'm a reviewer">Mine</button>
-      <button class:on={showAll} disabled={loading} onclick={() => !showAll && onscope(true)} title="100 most recently updated open merge requests">All</button>
+      <button class:on={showAll} disabled={loading} onclick={() => !showAll && onscope(true)} title="Recently updated open merge requests in your groups">All</button>
     </div>
     <span class="stxt">{#if loading}Refreshing…{:else if refreshedAt}{mrs.length} open · updated {ago(refreshedAt, now)}{:else}Not loaded yet{/if}</span>
   </div>

@@ -103,7 +103,8 @@ pub async fn list_my_mrs(st: State<'_, AppState>, all: bool) -> Result<MrList> {
         }
     };
     let mrs = if all {
-        api::all_mrs(&g, &me).await?
+        let group = st.settings.lock().unwrap().mr_group.clone();
+        api::all_mrs(&g, &me, &group).await?
     } else {
         api::my_mrs(&g, &me).await?
     };

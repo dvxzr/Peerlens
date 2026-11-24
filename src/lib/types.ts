@@ -28,7 +28,7 @@ export interface Note {
 }
 export interface Discussion { id: string; individual_note: boolean; notes: Note[] }
 export interface Settings {
-  glab_path: string; host: string; claude_path: string; codex_path: string; default_agent: string;
+  glab_path: string; host: string; mr_group: string; claude_path: string; codex_path: string; default_agent: string;
   review_language: string; max_review_bytes: number; collapse_lines: number; agent_timeout_secs: number;
   theme: "dark" | "light" | "system"; default_model: string; default_effort: string; default_codex_model: string; chunk_delay_secs: number; max_chunks: number;
   max_reviews_per_hour: number; max_usage_pct: number; repo_max_mb: number; repo_exclude: string[];

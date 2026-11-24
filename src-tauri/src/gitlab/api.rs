@@ -31,10 +31,10 @@ pub async fn my_mrs(g: &Glab, me: &User) -> Result<Vec<MrSummary>> {
     Ok(merge_roles(assigned, reviewing))
 }
 
-/// Mine (with role flags) plus other open MRs in my top-level groups (subgroups included).
+/// Mine (with role flags) plus other open MRs in `group` (full path; "" = all my top-level groups), subgroups included.
 /// Group-scoped on purpose: instance-wide `merge_requests?scope=all&order_by=updated_at` times out on big instances.
-pub async fn all_mrs(g: &Glab, me: &User) -> Result<Vec<MrSummary>> {
-    let (mut out, rest) = tokio::try_join!(my_mrs(g, me), group_mrs(g))?;
+pub async fn all_mrs(g: &Glab, me: &User, group: &str) -> Result<Vec<MrSummary>> {
+    let (mut out, rest) = tokio::try_join!(my_mrs(g, me), group_mrs(g, group))?;
     for m in rest {
         if !out.iter().any(|o| (o.project_id, o.iid) == (m.project_id, m.iid)) {
             out.push(m);
@@ -45,12 +45,24 @@ pub async fn all_mrs(g: &Glab, me: &User) -> Result<Vec<MrSummary>> {
 }
 
 /// shortcut: one page (100 most recently updated) per group; paginate if that proves too few.
-async fn group_mrs(g: &Glab) -> Result<Vec<MrSummary>> {
+async fn group_mrs(g: &Glab, group: &str) -> Result<Vec<MrSummary>> {
     #[derive(serde::Deserialize)]
     struct Group {
-        id: u64,
+        id: String,
     }
-    let groups: Vec<Group> = get(g, "groups?min_access_level=10&top_level_only=true&per_page=100", false).await?;
+    let groups: Vec<Group> = if group.is_empty() {
+        let ids: Vec<serde_json::Value> =
+            get(g, "groups?min_access_level=10&top_level_only=true&per_page=100", false).await?;
+        ids.iter()
+            .map(|v| Group {
+                id: v["id"].to_string(),
+            })
+            .collect()
+    } else {
+        vec![Group {
+            id: group.replace('/', "%2F"),
+        }]
+    };
     let mut set = tokio::task::JoinSet::new();
     for gr in groups {
         let g = g.clone();
@@ -201,10 +213,13 @@ mod tests {
         assert!(both.is_assignee && both.is_reviewer);
         assert!(mrs.iter().any(|m| m.iid == 3 && m.is_reviewer && !m.is_assignee));
         // "All" adds others' MRs without role flags and keeps mine flagged, deduped.
-        let all = all_mrs(&g, &me).await.unwrap();
+        let all = all_mrs(&g, &me, "").await.unwrap();
         assert_eq!(all.len(), 4);
         assert!(all.iter().any(|m| m.iid == 9 && !m.is_assignee && !m.is_reviewer));
         assert!(all.iter().find(|m| m.iid == 1).unwrap().is_assignee);
+        // A configured subgroup is queried by its encoded full path.
+        let sub = all_mrs(&g, &me, "group/team").await.unwrap();
+        assert!(sub.iter().any(|m| m.iid == 9));
 
         let d = mr_details(&g, 10, 1).await.unwrap();
         assert_eq!(d.diff_refs.unwrap().head_sha, "abc123");

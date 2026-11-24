@@ -160,6 +160,7 @@
       <section>
         <h3><Icon name="mr" size={14} />GitLab</h3>
         <label class="f"><span>Host</span><input bind:value={s.host} placeholder="glab default host" spellcheck="false" /></label>
+        <label class="f"><span>Group for “All”</span><input bind:value={s.mr_group} placeholder="all your top-level groups" spellcheck="false" /></label>
         <label class="f"><span>glab path</span><input bind:value={s.glab_path} placeholder="auto-detect" spellcheck="false" /></label>
       </section>
 

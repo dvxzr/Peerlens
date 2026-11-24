@@ -8,6 +8,8 @@ pub struct Settings {
     pub glab_path: String,
     /// GitLab host passed as `--hostname`; empty = glab's default host.
     pub host: String,
+    /// Group full path (e.g. "team/sub") whose open MRs the sidebar's "All" shows; empty = all my top-level groups.
+    pub mr_group: String,
     pub claude_path: String,
     pub codex_path: String,
     pub default_agent: String,
@@ -45,6 +47,7 @@ impl Default for Settings {
         Self {
             glab_path: String::new(),
             host: String::new(),
+            mr_group: String::new(),
             claude_path: String::new(),
             codex_path: String::new(),
             default_agent: "claude".into(),
@@ -83,6 +86,14 @@ impl Settings {
             return Err(format!("Invalid GitLab host: {}", self.host));
         }
         self.host = self.host.trim().to_string();
+        let group = self.mr_group.trim().trim_matches('/');
+        let group_ok = group.chars().all(|c| c.is_ascii_alphanumeric() || "_-./".contains(c))
+            && !group.contains("..")
+            && !group.starts_with(['-', '.']);
+        if !group_ok {
+            return Err(format!("Invalid GitLab group path: {}", self.mr_group));
+        }
+        self.mr_group = group.to_string();
         if !["dark", "light", "system"].contains(&self.theme.as_str()) {
             self.theme = "dark".into();
         }
@@ -178,6 +189,24 @@ mod tests {
         }
         .validated()
         .is_err());
+        for bad in ["../x", "a b", "-x", "a?b=1"] {
+            assert!(
+                Settings {
+                    mr_group: bad.into(),
+                    ..Default::default()
+                }
+                .validated()
+                .is_err(),
+                "{bad}"
+            );
+        }
+        let g = Settings {
+            mr_group: " /team/sub-1/ ".into(),
+            ..Default::default()
+        }
+        .validated()
+        .unwrap();
+        assert_eq!(g.mr_group, "team/sub-1");
         assert!(Settings {
             host: "gitlab.example.com:8443".into(),
             ..Default::default()

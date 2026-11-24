@@ -18,6 +18,7 @@
   let agents = $state<AgentInfo[]>([]);
   let sidebarW = $state(pref("sidebarW", 300));
   let sidebarOpen = $state(pref("sidebarOpen", true));
+  let showAll = $state(pref("showAllMrs", false)); // sidebar scope: mine (assignee/reviewer) or all open
   $effect(() => setPref("sidebarW", sidebarW));
   $effect(() => setPref("sidebarOpen", sidebarOpen));
   const toggleSidebar = () => (sidebarOpen = !sidebarOpen);
@@ -28,7 +29,7 @@
     loading = true;
     error = "";
     try {
-      mrs = (await api.listMyMrs()).mrs;
+      mrs = (await api.listMyMrs(showAll)).mrs;
       refreshedAt = Date.now();
     } catch (e) {
       error = errText(e);
@@ -79,7 +80,8 @@
 <svelte:window onkeydown={keys} />
 <div class="layout" style:grid-template-columns={sidebarOpen ? `${sidebarW}px 1px minmax(0,1fr)` : "minmax(0,1fr)"}>
   {#if sidebarOpen}
-    <Sidebar {mrs} {loading} {error} {refreshedAt} {selected} onselect={(m) => (selected = m)} onrefresh={refresh}
+    <Sidebar {mrs} {loading} {error} {refreshedAt} {selected} {showAll} onselect={(m) => (selected = m)} onrefresh={refresh}
+      onscope={(all) => { showAll = all; setPref("showAllMrs", all); refresh(); }}
       onsettings={() => (showSettings = true)} onhide={toggleSidebar} />
     <div class="resizer" role="separator" aria-orientation="vertical" onpointerdown={drag}></div>
   {/if}

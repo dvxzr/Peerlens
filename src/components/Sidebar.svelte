@@ -6,9 +6,9 @@
   import { pref, setPref } from "../lib/prefs";
   import { updates } from "../lib/updates.svelte";
 
-  let { mrs, loading, error, refreshedAt, selected, onselect, onrefresh, onsettings, onhide }: {
-    mrs: MrSummary[]; loading: boolean; error: string; refreshedAt: number | null;
-    selected: MrSummary | null; onselect: (m: MrSummary) => void; onrefresh: () => void; onsettings: () => void; onhide: () => void;
+  let { mrs, loading, error, refreshedAt, selected, showAll, onselect, onrefresh, onscope, onsettings, onhide }: {
+    mrs: MrSummary[]; loading: boolean; error: string; refreshedAt: number | null; selected: MrSummary | null; showAll: boolean;
+    onselect: (m: MrSummary) => void; onrefresh: () => void; onscope: (all: boolean) => void; onsettings: () => void; onhide: () => void;
   } = $props();
 
   // Re-render relative times ("updated 3 minutes ago") while the list sits idle.
@@ -65,7 +65,11 @@
     {#if q}<button class="ghost clear" onclick={() => (q = "")} title="Clear"><Icon name="x" size={13} /></button>{/if}
   </div>
   <div class="status dim">
-    {#if loading}Refreshing…{:else if refreshedAt}{mrs.length} open · updated {ago(refreshedAt, now)}{:else}Not loaded yet{/if}
+    <div class="seg" role="group" aria-label="Which merge requests">
+      <button class:on={!showAll} disabled={loading} onclick={() => showAll && onscope(false)} title="Assigned to me or I'm a reviewer">Mine</button>
+      <button class:on={showAll} disabled={loading} onclick={() => !showAll && onscope(true)} title="100 most recently updated open merge requests">All</button>
+    </div>
+    <span class="stxt">{#if loading}Refreshing…{:else if refreshedAt}{mrs.length} open · updated {ago(refreshedAt, now)}{:else}Not loaded yet{/if}</span>
   </div>
   {#if error}<div class="error"><Icon name="alert" size={14} /><span>{error}</span></div>{/if}
   <div class="list">
@@ -123,7 +127,11 @@
   :global(html:not(.mac)) .searchbox input { padding-right: 52px; } /* "Ctrl+F" is wider than "⌘F" */
   .hint { position: absolute; right: 9px; font: 500 10.5px var(--mono); color: var(--text3); pointer-events: none; }
   .clear { position: absolute; right: 3px; padding: 4px; height: 26px; width: 26px; }
-  .status { font-size: 11px; padding: 0 14px 6px; }
+  .status { font-size: 11px; padding: 0 10px 6px; display: flex; align-items: center; gap: 8px; }
+  .stxt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .seg { display: inline-flex; flex: none; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
+  .seg button { border: none; background: none; padding: 2px 9px; border-radius: 6px; color: var(--text2); font-size: 11px; }
+  .seg button.on { background: var(--bg4); color: var(--text); font-weight: 600; }
   .error { display: flex; gap: 8px; align-items: flex-start; margin: 4px 10px 8px; padding: 8px 10px; border-radius: 9px; color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); font-size: 12px; overflow-wrap: anywhere; }
   .list { overflow-y: auto; flex: 1; padding: 0 8px 12px; }
   .group {

@@ -31,6 +31,20 @@ pub async fn my_mrs(g: &Glab, me: &User) -> Result<Vec<MrSummary>> {
     Ok(merge_roles(assigned, reviewing))
 }
 
+/// Mine (with role flags) plus every other open MR visible to me.
+pub async fn all_mrs(g: &Glab, me: &User) -> Result<Vec<MrSummary>> {
+    // shortcut: one page = the 100 most recently updated open MRs instance-wide; paginate if that proves too few.
+    let all_ep = "merge_requests?scope=all&state=opened&order_by=updated_at&per_page=100";
+    let (mut out, rest) = tokio::try_join!(my_mrs(g, me), get::<Vec<MrSummary>>(g, all_ep, false))?;
+    for m in rest {
+        if !out.iter().any(|o| (o.project_id, o.iid) == (m.project_id, m.iid)) {
+            out.push(m);
+        }
+    }
+    out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    Ok(out)
+}
+
 pub fn merge_roles(assigned: Vec<MrSummary>, reviewing: Vec<MrSummary>) -> Vec<MrSummary> {
     let mut out: Vec<MrSummary> = Vec::with_capacity(assigned.len() + reviewing.len());
     for mut m in assigned {
@@ -162,6 +176,11 @@ mod tests {
         let both = mrs.iter().find(|m| m.iid == 1).unwrap();
         assert!(both.is_assignee && both.is_reviewer);
         assert!(mrs.iter().any(|m| m.iid == 3 && m.is_reviewer && !m.is_assignee));
+        // "All" adds others' MRs without role flags and keeps mine flagged, deduped.
+        let all = all_mrs(&g, &me).await.unwrap();
+        assert_eq!(all.len(), 4);
+        assert!(all.iter().any(|m| m.iid == 9 && !m.is_assignee && !m.is_reviewer));
+        assert!(all.iter().find(|m| m.iid == 1).unwrap().is_assignee);
 
         let d = mr_details(&g, 10, 1).await.unwrap();
         assert_eq!(d.diff_refs.unwrap().head_sha, "abc123");
@@ -183,7 +202,7 @@ mod tests {
 
         // Every logged call must be a GET.
         let calls = std::fs::read_to_string(&log).unwrap();
-        assert!(calls.lines().count() >= 9);
+        assert!(calls.lines().count() >= 12);
         for l in calls.lines() {
             assert!(l.starts_with("api --method GET "), "non-GET call: {l}");
         }

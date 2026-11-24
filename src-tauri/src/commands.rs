@@ -91,7 +91,7 @@ pub struct MrList {
 }
 
 #[tauri::command]
-pub async fn list_my_mrs(st: State<'_, AppState>) -> Result<MrList> {
+pub async fn list_my_mrs(st: State<'_, AppState>, all: bool) -> Result<MrList> {
     let g = glab(&st)?;
     let cached = st.me.lock().unwrap().clone();
     let me = match cached {
@@ -102,7 +102,11 @@ pub async fn list_my_mrs(st: State<'_, AppState>) -> Result<MrList> {
             u
         }
     };
-    let mrs = api::my_mrs(&g, &me).await?;
+    let mrs = if all {
+        api::all_mrs(&g, &me).await?
+    } else {
+        api::my_mrs(&g, &me).await?
+    };
     Ok(MrList { me, mrs })
 }
 

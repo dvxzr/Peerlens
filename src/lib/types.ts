@@ -31,7 +31,7 @@ export interface Settings {
   glab_path: string; host: string; mr_group: string; claude_path: string; codex_path: string; default_agent: string;
   review_language: string; max_review_bytes: number; collapse_lines: number; agent_timeout_secs: number;
   theme: "dark" | "light" | "system"; default_model: string; default_effort: string; default_codex_model: string; chunk_delay_secs: number; max_chunks: number;
-  max_reviews_per_hour: number; max_usage_pct: number; repo_max_mb: number; repo_exclude: string[];
+  max_reviews_per_hour: number; max_usage_pct: number; repo_max_mb: number; repo_exclude: string[]; repo_cache_mb: number;
   review_guidelines: string;
 }
 export type Marker = { severity: string; title: string; id: number };
@@ -52,11 +52,15 @@ export interface StoredReview {
   repo: SnapshotStats | null;
   threads?: Record<string, ThreadMsg[]>;
 }
-export interface ThreadMsg { role: "user" | "agent"; text: string; at: number; by: string }
+export interface ThreadMsg { role: "user" | "agent"; text: string; at: number; by: string; activity?: string[] }
 export type ThreadEvent =
   | { type: "text"; text: string }
   | { type: "usage"; usage: Usage }
+  | { type: "repo"; stage: "downloading" | "ready" }
+  | { type: "activity"; text: string }
+  | { type: "notice"; text: string }
   | { type: "done"; thread: ThreadMsg[] };
+export interface CacheInfo { count: number; bytes: number }
 export interface SnapshotStats { files: number; bytes: number; excluded: string[]; skipped_large: number; skipped_links: number }
 export interface UsageWindow { name: string; utilization: number; resets_at: number; status: string }
 export interface Usage { status: string; windows: UsageWindow[] }

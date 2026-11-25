@@ -51,17 +51,19 @@ async fn live_claude_review() {
     // PEERLENS_LIVE_REPO=1 also exercises repo context (downloads the archive, read-only tools).
     let snap = if std::env::var("PEERLENS_LIVE_REPO").is_ok() {
         let sha = mr.diff_refs.as_ref().unwrap().head_sha.clone();
-        let sn = peerlens_lib::review::repo::snapshot(
+        let dir = peerlens_lib::platform::TempDir::new("peerlens-live-repo").unwrap();
+        let stats = peerlens_lib::review::repo::fetch_into(
             &g,
             mr.source_project_id.unwrap_or(mr.project_id),
             &sha,
             300 << 20,
             &peerlens_lib::review::repo::default_exclude(),
+            dir.0.clone(),
         )
         .await
         .unwrap();
-        println!("snapshot: {:?}", (sn.stats.files, sn.stats.bytes, &sn.stats.excluded));
-        Some(sn)
+        println!("snapshot: {:?}", (stats.files, stats.bytes, &stats.excluded));
+        Some(dir)
     } else {
         None
     };
@@ -73,7 +75,7 @@ async fn live_claude_review() {
         effort: std::env::var("PEERLENS_LIVE_MODEL").is_err().then(|| "low".into()),
         system_prompt: prompt::system_prompt("English", AgentKind::Claude, snap.is_some(), "", ""),
         timeout: std::time::Duration::from_secs(300),
-        repo: snap.as_ref().map(|s| s.root().to_path_buf()),
+        repo: snap.as_ref().map(|s| s.0.clone()),
         known_features: None,
     };
     let (_tx, mut rx) = tokio::sync::watch::channel(false);
@@ -122,7 +124,7 @@ async fn live_claude_review() {
         r.skipped,
         r.activity.len()
     );
-    let root = snap.as_ref().map(|s| s.root().to_path_buf());
+    let root = snap.as_ref().map(|s| s.0.clone());
     drop(snap);
     assert!(root.is_none_or(|p| !p.exists()), "snapshot deleted");
     assert!(r.errors.is_empty());

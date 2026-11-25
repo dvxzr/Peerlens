@@ -136,9 +136,14 @@
   let draft = $state("");
   let confirmThread = $state<number | null>(null);
   let threadErr = $state("");
+  // Discussion reads the repo snapshot of the reviewed commit; on by default when the review used it.
+  let threadRepo = $state(false);
   let modelLabel = $derived(modelItems.find((m) => m.value === model)?.label || "default model");
   function toggleThread(i: number) {
-    if (openThread !== i) draft = "";
+    if (openThread !== i) {
+      draft = "";
+      threadRepo = !!r?.repo;
+    }
     openThread = openThread === i ? null : i;
     threadErr = "";
   }
@@ -146,7 +151,7 @@
     const m = draft.trim();
     if (!m || r?.running || r?.chat || overLimit || codexNotLoggedIn) return;
     draft = "";
-    if (!(await discuss(projectId, iid, i, m, agent, model, effort))) draft ||= m;
+    if (!(await discuss(projectId, iid, i, m, agent, model, effort, threadRepo))) draft ||= m;
   }
   async function delThread(i: number) {
     if (confirmThread !== i) {
@@ -245,7 +250,13 @@
             <span>Context:</span>
             <span class="pill"><Icon name="target" size={11} />this finding</span>
             {#if f.file}<span class="pill mono">{f.file.split("/").pop()} diff</span>{/if}
-            {#if stale}<span class="pill stalep" title="The MR changed since the review; the agent sees the current diff"><Icon name="clock" size={11} />MR changed</span>{/if}
+            <button class="rc trc" class:on={threadRepo} onclick={() => (threadRepo = !threadRepo)} role="switch" aria-checked={threadRepo} disabled={!!r.chat}
+              title={threadRepo
+                ? `The agent may read the repo at the reviewed commit ${r.headSha.slice(0, 8)} (read-only, secrets removed). Downloaded once, then cached.`
+                : "Diff only. Click to let the agent read the repo at the reviewed commit."}>
+              <Icon name="folder" size={11} />Repo{#if threadRepo}<span class="mono">· {r.headSha.slice(0, 7)}</span>{/if}
+            </button>
+            {#if stale}<span class="pill stalep" title="The MR changed since the review. The diff is the current one; the repo is the reviewed commit."><Icon name="clock" size={11} />MR changed</span>{/if}
             <span class="sp"></span>
             {#if thread.length}
               <button class="ghost icon tbtn" class:confirm={confirmThread === i} onclick={() => delThread(i)}
@@ -253,10 +264,11 @@
             {/if}
             <button class="ghost icon tbtn" onclick={() => (openThread = null)} title="Collapse"><Icon name="chevronDown" size={13} style="transform:rotate(180deg)" /></button>
           </div>
-          {#each thread as m, j (j)}{@render msg(m.role, m.text, m.by, m.at)}{/each}
+          {#each thread as m, j (j)}{@render msg(m.role, m.text, m.by, m.at, false, m.activity)}{/each}
           {#if r.chat?.index === i}
             {@render msg("user", r.chat.message, "", null)}
-            {@render msg("agent", r.chat.reply, "", null, true)}
+            {#if r.chat.notice}<div class="note-warn"><Icon name="folder" size={13} /><span>{r.chat.notice}</span></div>{/if}
+            {@render msg("agent", r.chat.reply, "", null, true, r.chat.activity, r.chat.repo === "downloading" ? "Preparing repo…" : "")}
           {/if}
           {#if r.chatError?.index === i}<div class="warn"><Icon name="alert" size={14} /><span>{r.chatError.message}</span></div>{/if}
           {#if threadErr}<div class="warn"><Icon name="alert" size={14} /><span>{threadErr}</span></div>{/if}
@@ -275,14 +287,14 @@
               {/if}
             </div>
           </div>
-          <div class="tnote"><Icon name="eye" size={11} />Agent sees only this finding and the diff of its file. Each reply resends the thread.</div>
+          <div class="tnote"><Icon name="eye" size={11} />{threadRepo ? "Agent sees this finding, the diff of its file and the repo at the reviewed commit." : "Agent sees only this finding and the diff of its file."} Each reply resends the thread.</div>
         </div>
       {/if}
     {/if}
   </div>
 {/snippet}
 
-{#snippet msg(role: string, text: string, by: string, at: number | null, live = false)}
+{#snippet msg(role: string, text: string, by: string, at: number | null, live = false, acts: string[] = [], status = "")}
   {@const isAgent = role === "agent"}
   {@const kind = isAgent ? (by ? (by.startsWith("Codex") ? "codex" : "claude") : agent) : null}
   <div class="msg">
@@ -295,7 +307,13 @@
         {#if live}<span class="dim">· writing…</span>{:else if at}<span class="dim">· {ago(at * 1000)}</span>{/if}
       </div>
       {#if isAgent}
-        {#if text}<div class="mtext"><Markdown {text} /></div>{:else}<div class="dim thinking">Thinking…</div>{/if}
+        {#if acts.length}
+          <details class="tacts" open={live && !text}>
+            <summary><Icon name="eye" size={11} />Read {acts.length} {acts.length === 1 ? "item" : "items"} in the repo</summary>
+            {#each acts as a, k (k)}<div class="act mono">{a}</div>{/each}
+          </details>
+        {/if}
+        {#if text}<div class="mtext"><Markdown {text} /></div>{:else}<div class="dim thinking">{status || "Thinking…"}</div>{/if}
       {:else}
         <div class="mtext utext">{text}</div>
       {/if}
@@ -326,7 +344,7 @@
           <Menu items={langItems} value={language} onselect={(v) => (language = v)} title="Language of the review text" align="right" />
           <button class="rc" class:on={repoContext} onclick={() => (repoContext = !repoContext)} role="switch" aria-checked={repoContext}
             title={repoContext
-              ? "Repo context on: the agent may read a read-only snapshot of the repo at the MR head (secrets removed, deleted after). Uses more of your limits."
+              ? "Repo context on: the agent may read a read-only snapshot of the repo at the MR head (secrets removed). The snapshot stays in a local cache so finding discussions can read it too. Uses more of your limits."
               : "Repo context off: the agent sees only the diff. Click to let it read the repo."}>
             <Icon name="folder" size={13} />Repo
           </button>
@@ -584,6 +602,11 @@
   .tbar { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; }
   .tsend { padding: 3px 10px; font-size: 12px; }
   .tstop { padding: 3px 10px; font-size: 12px; gap: 5px; color: var(--red); border-color: color-mix(in srgb, var(--red) 35%, transparent); }
+  .trc { font-size: 11px; padding: 1px 7px; gap: 4px; }
+  .trc .mono { font-size: 10.5px; opacity: .8; }
+  .tacts { font-size: 11px; margin-bottom: 4px; }
+  .tacts summary { cursor: pointer; display: flex; align-items: center; gap: 5px; color: var(--text3); list-style: none; }
+  .tacts .act { padding-left: 16px; }
   .tnote { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text3); }
   .summary { background: var(--bg2); border: 1px solid var(--border); padding: 10px 12px; border-radius: 11px; white-space: pre-wrap; line-height: 1.5; }
   .warn { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 9px; color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); font-size: 12px; margin-bottom: 6px; overflow-wrap: anywhere; }

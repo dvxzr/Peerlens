@@ -19,7 +19,7 @@ export interface ReviewState {
   /** Discussion threads keyed by finding index. */
   threads: Record<number, ThreadMsg[]>;
   /** The thread reply being written right now. */
-  chat: { index: number; message: string; reply: string } | null;
+  chat: { index: number; message: string; reply: string; repo: "" | "downloading" | "ready"; activity: string[]; notice: string } | null;
   chatError: { index: number; message: string } | null;
 }
 
@@ -99,17 +99,22 @@ export async function remove(pid: number, iid: number) {
 
 /** Send one message in a finding's thread. Resolves true when the reply was saved. */
 export async function discuss(
-  pid: number, iid: number, index: number, message: string, agent: AgentKind, model: string, effort: string,
+  pid: number, iid: number, index: number, message: string, agent: AgentKind, model: string, effort: string, repoContext: boolean,
 ): Promise<boolean> {
   const s = reviews[key(pid, iid)];
   if (!s || s.running || s.chat) return false;
-  s.chat = { index, message, reply: "" };
+  s.chat = { index, message, reply: "", repo: "", activity: [], notice: "" };
   s.chatError = null;
   try {
-    await api.discussFinding({ projectId: pid, iid }, index, message, agent, model, effort, (e) => {
-      if (e.type === "text" && s.chat) s.chat.reply += e.text;
-      else if (e.type === "usage") usage.value = e.usage;
+    await api.discussFinding({ projectId: pid, iid }, index, message, agent, model, effort, repoContext, (e) => {
+      const c = s.chat;
+      if (e.type === "usage") usage.value = e.usage;
       else if (e.type === "done") s.threads[index] = e.thread;
+      else if (!c) return;
+      else if (e.type === "text") c.reply += e.text;
+      else if (e.type === "repo") c.repo = e.stage;
+      else if (e.type === "activity") c.activity.push(e.text);
+      else if (e.type === "notice") c.notice = e.text;
     });
     return true;
   } catch (e) {

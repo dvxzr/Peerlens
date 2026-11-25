@@ -189,8 +189,8 @@ async fn refuses_too_many_agent_runs() {
 }
 
 #[tokio::test]
-async fn repo_context_snapshot_is_readonly_input_and_deleted() {
-    use peerlens_lib::review::repo;
+async fn repo_context_snapshot_is_readonly_input_and_cached() {
+    use peerlens_lib::review::{cache, repo};
     setup();
     let g = Glab {
         bin: format!("{FIX}/fake-glab").into(),
@@ -198,10 +198,14 @@ async fn repo_context_snapshot_is_readonly_input_and_deleted() {
     };
     let mr = api::mr_details(&g, 10, 1).await.unwrap();
     let files = api::mr_diffs(&g, 10, 1).await.unwrap();
-    let snap = repo::snapshot(&g, 10, "abc123", 10 << 20, &repo::default_exclude())
-        .await
-        .unwrap();
-    let root = snap.root().to_path_buf();
+    let dir = peerlens_lib::platform::TempDir::new("peerlens-e2e-cache").unwrap();
+    let ex = repo::default_exclude();
+    let snap = cache::acquire(&dir.0, "10-abc123", &ex, |into| {
+        repo::fetch_into(&g, 10, "abc123", 10 << 20, &ex, into)
+    })
+    .await
+    .unwrap();
+    let root = snap.root.clone();
     assert_eq!(snap.stats.files, 2);
     assert_eq!(snap.stats.excluded, [".env"]);
     assert_eq!(snap.stats.skipped_links, 1);
@@ -234,8 +238,12 @@ async fn repo_context_snapshot_is_readonly_input_and_deleted() {
     let log = std::fs::read_to_string(format!("{}.repo", log_base())).unwrap();
     assert!(log.contains("--tools Read,Grep,Glob"), "{log}");
     assert!(log.contains("repo-files: src/auth.py tests/test_auth.py"), "{log}");
-    drop(snap);
-    assert!(!root.exists(), "snapshot must be deleted after the review");
+    // Kept for the finding's discussion: the next acquire is served from disk, without glab.
+    let again = cache::acquire(&dir.0, "10-abc123", &ex, |_| async { panic!("must be a cache hit") })
+        .await
+        .unwrap();
+    assert_eq!(again.root, root);
+    assert!(root.join("src/auth.py").is_file() && !root.join(".env").exists());
 }
 
 async fn codex_review(mode: &str, repo: Option<std::path::PathBuf>) -> StoredReview {

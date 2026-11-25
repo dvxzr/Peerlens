@@ -1,8 +1,7 @@
 //! Read-only repository snapshot for "repo context": the GitLab archive at the MR head,
-//! unpacked into a temp dir that is deleted when the review ends.
+//! unpacked into a directory that `cache` keeps between runs.
 use crate::error::{AppError, Result};
 use crate::gitlab::runner::Glab;
-use crate::platform::TempDir;
 use serde::{Deserialize, Serialize};
 use std::path::{Component, Path, PathBuf};
 
@@ -63,17 +62,6 @@ pub struct SnapshotStats {
     pub skipped_links: usize,
 }
 
-pub struct Snapshot {
-    pub dir: TempDir,
-    pub stats: SnapshotStats,
-}
-
-impl Snapshot {
-    pub fn root(&self) -> &Path {
-        &self.dir.0
-    }
-}
-
 /// Unpack a .tar.gz, dropping the archive's top-level folder. Only regular files and directories
 /// are written (no symlinks/hardlinks that could point outside), and only plain relative paths.
 pub fn extract(tgz: &Path, into: &Path, exclude: &[String], max_total: u64) -> Result<SnapshotStats> {
@@ -125,13 +113,19 @@ pub fn extract(tgz: &Path, into: &Path, exclude: &[String], max_total: u64) -> R
     Ok(st)
 }
 
-/// Download the archive of `project_id` at `sha` through glab (GET) and unpack it.
-pub async fn snapshot(g: &Glab, project_id: u64, sha: &str, max_bytes: u64, exclude: &[String]) -> Result<Snapshot> {
+/// Download the archive of `project_id` at `sha` through glab (GET) and unpack it into the empty dir `into`.
+pub async fn fetch_into(
+    g: &Glab,
+    project_id: u64,
+    sha: &str,
+    max_bytes: u64,
+    exclude: &[String],
+    into: PathBuf,
+) -> Result<SnapshotStats> {
     if sha.is_empty() || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err(AppError::Rejected(format!("sha {sha}")));
     }
-    let dir = TempDir::new("peerlens-repo")?;
-    let tgz = dir.0.with_extension("tar.gz");
+    let tgz = into.with_extension("tar.gz");
     let _cleanup = scopeguard_file(&tgz);
     g.download(
         &format!("projects/{project_id}/repository/archive.tar.gz?sha={sha}"),
@@ -139,11 +133,10 @@ pub async fn snapshot(g: &Glab, project_id: u64, sha: &str, max_bytes: u64, excl
         max_bytes,
     )
     .await?;
-    let (t, d, ex) = (tgz.clone(), dir.0.clone(), exclude.to_vec());
-    let stats = tokio::task::spawn_blocking(move || extract(&t, &d, &ex, max_bytes.saturating_mul(4)))
+    let (t, ex) = (tgz.clone(), exclude.to_vec());
+    tokio::task::spawn_blocking(move || extract(&t, &into, &ex, max_bytes.saturating_mul(4)))
         .await
-        .map_err(|e| AppError::Agent(format!("unpack: {e}")))??;
-    Ok(Snapshot { dir, stats })
+        .map_err(|e| AppError::Agent(format!("unpack: {e}")))?
 }
 
 /// Deletes the downloaded archive file when dropped.
@@ -160,6 +153,7 @@ fn scopeguard_file(p: &Path) -> FileGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::platform::TempDir;
 
     #[test]
     fn globbing() {

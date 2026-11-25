@@ -1,3 +1,4 @@
+pub mod cache;
 pub mod chunking;
 pub mod prompt;
 pub mod repo;
@@ -53,9 +54,36 @@ pub enum ReviewEvent {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ThreadEvent {
-    Text { text: String },
-    Usage { usage: Usage },
-    Done { thread: Vec<storage::ThreadMsg> },
+    Text {
+        text: String,
+    },
+    Usage {
+        usage: Usage,
+    },
+    /// Repo context: "downloading" (cache miss) | "ready".
+    Repo {
+        stage: String,
+    },
+    /// A tool call, formatted like ReviewEvent::Activity.
+    Activity {
+        text: String,
+    },
+    /// Something the user should know that does not stop the reply.
+    Notice {
+        text: String,
+    },
+    Done {
+        thread: Vec<storage::ThreadMsg>,
+    },
+}
+
+/// "Read src/a.py": a tool call with paths shown relative to the snapshot root.
+pub fn tool_text(repo: Option<&std::path::Path>, name: &str, detail: &str) -> String {
+    let root = repo.map(|r| r.to_string_lossy().into_owned()).unwrap_or_default();
+    if root.is_empty() {
+        return format!("{name} {detail}");
+    }
+    format!("{name} {}", detail.replace(&format!("{root}/"), "").replace(&root, "."))
 }
 
 /// Mark a finding anchored if its lines exist on the new side of that file; fill the snippet from the diff.
@@ -196,18 +224,7 @@ pub async fn run_review(
                 base.errors.push(m);
             }
             AgentEvent::Tool(name, detail) => {
-                // Show paths relative to the snapshot root.
-                let root = spec
-                    .repo
-                    .as_ref()
-                    .map(|r| r.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                let detail = if root.is_empty() {
-                    detail
-                } else {
-                    detail.replace(&format!("{root}/"), "").replace(&root, ".")
-                };
-                let text = format!("{name} {detail}");
+                let text = tool_text(spec.repo.as_deref(), &name, &detail);
                 emit(ReviewEvent::Activity { text: text.clone() });
                 if base.activity.len() < 500 {
                     base.activity.push(text);

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { AgentInfo, MenuItem, Settings } from "../lib/types";
+  import type { AgentInfo, CacheInfo, MenuItem, Settings } from "../lib/types";
   import { fade, scale } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import Icon from "./Icon.svelte";
@@ -37,8 +37,20 @@
   // Review prompt: an empty setting means "built-in default"; show the default text so it can be edited.
   let defaultGuide = $state("");
   let guide = $state(s.review_guidelines);
+  let cache = $state<CacheInfo | null>(null);
+  let cacheErr = $state("");
+  async function clearCache() {
+    try {
+      await api.clearRepoCache();
+      cacheErr = "";
+    } catch (e) {
+      cacheErr = String(e);
+    }
+    cache = await api.repoCacheInfo();
+  }
   onMount(async () => {
     loadVersion();
+    api.repoCacheInfo().then((c) => (cache = c));
     defaultGuide = await api.defaultGuidelines();
     if (!guide.trim()) guide = defaultGuide;
   });
@@ -149,8 +161,14 @@
 
       <section>
         <h3><Icon name="folder" size={14} />Repo context</h3>
-        <p class="hint">When enabled in the review panel, the repository at the MR head is downloaded through glab (GET), unpacked into a temporary folder the agent may only read, and deleted after the review.</p>
+        <p class="hint">When enabled in the review panel, the repository at the MR head is downloaded through glab (GET) and unpacked into a folder the agent may only read. It stays in a local cache so discussions of the review's findings read the same code; the least recently used snapshots are removed to fit the limit below, and any unused for 14 days.</p>
         <label class="f"><span>Max archive size <em>MB</em></span><input type="number" min="1" bind:value={s.repo_max_mb} /></label>
+        <label class="f"><span>Keep snapshots up to <em>MB</em></span><input type="number" min="100" bind:value={s.repo_cache_mb} /></label>
+        <div class="f">
+          <span class="dim">{cache ? `Cached: ${cache.count} snapshot${cache.count === 1 ? "" : "s"}, ${(cache.bytes / 1_048_576).toFixed(1)} MB` : "Cached: …"}</span>
+          <button class="ghost" onclick={clearCache} disabled={!cache?.count}><Icon name="trash" size={13} />Clear</button>
+        </div>
+        {#if cacheErr}<p class="hint err">{cacheErr}</p>{/if}
         <label class="col"><span>Never unpack these files <em>one pattern per line, * and ? allowed</em></span>
           <textarea rows="5" spellcheck="false" value={s.repo_exclude.join("\n")}
             oninput={(e) => (s.repo_exclude = e.currentTarget.value.split("\n").map((x) => x.trim()).filter(Boolean))}></textarea>
@@ -214,6 +232,7 @@
   .col { display: flex; flex-direction: column; gap: 6px; padding: 4px 0; }
   textarea { font-family: var(--mono); font-size: 12px; resize: vertical; min-height: 90px; }
   .hint { margin: -4px 0 8px; font-size: 12px; color: var(--text3); line-height: 1.5; }
+  .hint.err { color: var(--red); }
   .seg { display: inline-flex; background: var(--bg1); border: 1px solid var(--border); border-radius: 10px; padding: 3px; gap: 2px; }
   .seg button { border: none; background: none; padding: 5px 14px; border-radius: 8px; color: var(--text2); }
   .seg button.on { background: var(--bg4); color: var(--text); font-weight: 600; }

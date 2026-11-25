@@ -40,6 +40,8 @@ pub struct Settings {
     pub repo_max_mb: u64,
     /// Repo context: file-name globs never unpacked (secrets).
     pub repo_exclude: Vec<String>,
+    /// Repo context: disk budget for snapshots kept for later reviews and discussions.
+    pub repo_cache_mb: u64,
 }
 
 impl Default for Settings {
@@ -66,6 +68,7 @@ impl Default for Settings {
             review_guidelines: String::new(),
             repo_max_mb: 300,
             repo_exclude: crate::review::repo::default_exclude(),
+            repo_cache_mb: 2_048,
         }
     }
 }
@@ -115,6 +118,7 @@ impl Settings {
         self.max_reviews_per_hour = self.max_reviews_per_hour.clamp(1, 1_000);
         self.max_usage_pct = self.max_usage_pct.clamp(1.0, 100.0);
         self.repo_max_mb = self.repo_max_mb.clamp(1, 5_000);
+        self.repo_cache_mb = self.repo_cache_mb.clamp(100, 100_000);
         Ok(self)
     }
 }

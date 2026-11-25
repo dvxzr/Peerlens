@@ -15,6 +15,9 @@ pub fn run() {
         )
         .init();
     platform::cleanup_stale_temp();
+    if let Some(d) = review::cache::default_dir() {
+        review::cache::cleanup_partial(&d);
+    }
     let state = commands::AppState {
         settings: std::sync::Mutex::new(settings::load()),
         ..Default::default()
@@ -51,6 +54,8 @@ pub fn run() {
             commands::cancel_review,
             commands::get_usage,
             commands::delete_review,
+            commands::repo_cache_info,
+            commands::clear_repo_cache,
             commands::discuss_finding,
             commands::delete_thread,
             commands::default_guidelines,

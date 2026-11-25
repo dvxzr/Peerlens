@@ -1,5 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
-import type { UpdateInfo, UpdateProgress, AgentInfo, AgentKind, ReviewEvent, StoredReview, ThreadEvent, Usage, Commit, Discussion, FileDiff, MrDetails, MrSummary, Settings, User } from "./types";
+import type { CacheInfo, UpdateInfo, UpdateProgress, AgentInfo, AgentKind, ReviewEvent, StoredReview, ThreadEvent, Usage, Commit, Discussion, FileDiff, MrDetails, MrSummary, Settings, User } from "./types";
 
 type Id = { projectId: number; iid: number };
 
@@ -19,12 +19,15 @@ export const api = {
   getUsage: () => invoke<Usage | null>("get_usage"),
   deleteReview: (id: Id) => invoke<void>("delete_review", id),
   discussFinding: (
-    id: Id, index: number, message: string, agent: AgentKind, model: string, effort: string, onEvent: (e: ThreadEvent) => void,
+    id: Id, index: number, message: string, agent: AgentKind, model: string, effort: string, repoContext: boolean,
+    onEvent: (e: ThreadEvent) => void,
   ) => {
     const ch = new Channel<ThreadEvent>();
     ch.onmessage = onEvent;
-    return invoke<void>("discuss_finding", { ...id, index, message, agent, model, effort, onEvent: ch });
+    return invoke<void>("discuss_finding", { ...id, index, message, agent, model, effort, repoContext, onEvent: ch });
   },
+  repoCacheInfo: () => invoke<CacheInfo>("repo_cache_info"),
+  clearRepoCache: () => invoke<void>("clear_repo_cache"),
   deleteThread: (id: Id, index: number) => invoke<void>("delete_thread", { ...id, index }),
   defaultGuidelines: () => invoke<string>("default_guidelines"),
   appVersion: () => invoke<string>("app_version"),

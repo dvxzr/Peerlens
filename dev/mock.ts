@@ -67,7 +67,7 @@ const settings = {
   glab_path: "", host: "", claude_path: "", codex_path: "", default_agent: "claude", review_language: "English",
   max_review_bytes: 120000, collapse_lines: 800, agent_timeout_secs: 900, theme: new URLSearchParams(location.search).get("theme") ?? "dark",
   default_model: "sonnet", default_effort: "", default_codex_model: "", chunk_delay_secs: 3, max_chunks: 25, max_reviews_per_hour: 20, max_usage_pct: 80,
-  repo_max_mb: 300, repo_exclude: [".env", "*.pem"], review_guidelines: "",
+  repo_max_mb: 300, repo_exclude: [".env", "*.pem"], repo_cache_mb: 2048, review_guidelines: "",
 };
 const usage = { status: "allowed", windows: [
   { name: "five_hour", utilization: 0.42, resets_at: Date.now() / 1000 + 7200, status: "allowed" },
@@ -117,6 +117,8 @@ const handlers: Record<string, (a: any) => any> = {
   get_usage: () => usage,
   cancel_review: () => null,
   delete_review: () => null,
+  repo_cache_info: () => ({ count: 3, bytes: 412_000_000 }),
+  clear_repo_cache: () => null,
   app_version: () => "0.1.0",
   check_update: () => new Promise((r) => setTimeout(() => r({ current: "0.1.0", version: "0.2.0", date: "2026-12-01", notes: "## What's new\n\n### Features\n- Split diff view\n- Faster repo snapshots\n\n### Fixes\n- Pinned header overlapped the next file", can_install: true, release_url: "https://github.com/dvxzr/Peerlens/releases/tag/v0.2.0" }), 400)),
   install_update: () => new Promise(() => {}),
@@ -124,9 +126,16 @@ const handlers: Record<string, (a: any) => any> = {
   start_review: () => new Promise(() => {}),
   discuss_finding: async (a) => {
     const reply = "Good point. If the list is always capped at 20 items this is a **nit**, not a bug.";
+    const activity = a.repoContext ? ["Grep def check  in .", "Read src/auth/utils.py"] : [];
+    if (a.repoContext) {
+      a.onEvent.onmessage({ type: "repo", stage: "downloading" });
+      await new Promise((r) => setTimeout(r, 800));
+      a.onEvent.onmessage({ type: "repo", stage: "ready" });
+      for (const text of activity) { await new Promise((r) => setTimeout(r, 300)); a.onEvent.onmessage({ type: "activity", text }); }
+    }
     for (const w of reply.split(/(?= )/)) { await new Promise((r) => setTimeout(r, 60)); a.onEvent.onmessage({ type: "text", text: w }); }
     const t = review.threads[a.index] ?? [];
-    t.push({ role: "user", text: a.message, at: Date.now() / 1000, by: "" }, { role: "agent", text: reply, at: Date.now() / 1000, by: "Claude / sonnet" });
+    t.push({ role: "user", text: a.message, at: Date.now() / 1000, by: "" }, { role: "agent", text: reply, at: Date.now() / 1000, by: "Claude / sonnet", activity });
     review.threads[a.index] = t;
     a.onEvent.onmessage({ type: "done", thread: t });
   },

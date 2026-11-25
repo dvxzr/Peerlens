@@ -22,9 +22,11 @@ through [`glab`](https://gitlab.com/gitlab-org/cli), and only with read requests
 - **Reviewer notes.** Optionally tell the agent what the change is about and what to focus on or skip. Notes are kept
   per MR and sent as a separate trusted block; the MR description is already included.
 - **Discuss a finding.** Open a thread under any finding and argue with the agent about it. It sees the finding, the
-  diff of its file and the thread, and can defend, correct or withdraw it. Threads are saved with the review.
-- **Optional repo context.** The agent can read a temporary, read-only snapshot of the repository at the MR head
-  to check callers, definitions and tests. The snapshot is deleted after the review.
+  diff of its file, the thread and (with Repo on) the repository at the reviewed commit, and can defend, correct or
+  withdraw it. Threads are saved with the review.
+- **Optional repo context.** The agent can read a read-only snapshot of the repository at the MR head
+  to check callers, definitions and tests. Finding discussions can read the same snapshot (the reviewed commit).
+  Snapshots stay in a local cache (2 GB by default, least recently used removed first, unused ones after 14 days).
 - **Editable review prompt.** Change what the reviewer checks in Settings, or reset to the built-in prompt. The
   security rules and output format always stay.
 - **Usage guard for Claude.** One review at a time, an hourly cap, a pause between parts, and an automatic stop when
@@ -139,6 +141,7 @@ See [SECURITY.md](SECURITY.md) for the full security model and its limitations.
 | Pause when Claude usage reaches | 80% |
 | Max reviews per hour / agent runs per review / pause between parts | 20 / 25 / 3 s |
 | Repo context archive limit | 300 MB |
+| Repo snapshot cache | 2 GB |
 | Never unpack (repo context) | `.env*`, `*.pem`, `*.key`, `*secret*`, `*credential*`, … |
 | GitLab host, binary paths | glab's default host; auto-detect |
 

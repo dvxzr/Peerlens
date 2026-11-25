@@ -66,6 +66,33 @@ fn check_can_start(st: &AppState, s: &Settings, agent: AgentKind) -> Result<()> 
     Ok(())
 }
 
+/// The cached repo snapshot of `pid` at `sha`; on a miss `on_miss` runs, then it is downloaded (Cancel aborts).
+/// Older snapshots are then evicted in the background to fit the disk budget; this one is spared.
+async fn repo_snapshot(
+    g: &Glab,
+    s: &Settings,
+    pid: u64,
+    sha: &str,
+    rx: &mut watch::Receiver<bool>,
+    on_miss: impl FnOnce(),
+) -> Result<review::cache::Cached> {
+    use crate::error::AppError;
+    let dir = review::cache::default_dir().ok_or_else(|| AppError::Agent("No cache directory.".into()))?;
+    let key = review::cache::key(pid, sha).ok_or_else(|| AppError::Rejected(format!("sha {sha}")))?;
+    let max = s.repo_max_mb.max(1) * 1_048_576;
+    let fetch = review::cache::acquire(&dir, &key, &s.repo_exclude, |into| {
+        on_miss();
+        review::repo::fetch_into(g, pid, sha, max, &s.repo_exclude, into)
+    });
+    let snap = tokio::select! {
+        r = fetch => r?,
+        _ = rx.changed() => return Err(AppError::Cancelled),
+    };
+    let (budget, keep) = (s.repo_cache_mb * 1_048_576, snap.key.clone());
+    tokio::task::spawn_blocking(move || review::cache::evict(&dir, budget, &keep));
+    Ok(snap)
+}
+
 fn glab(st: &AppState) -> Result<Glab> {
     Glab::from_settings(&st.settings.lock().unwrap())
 }
@@ -187,8 +214,37 @@ pub fn delete_review(st: State<'_, AppState>, project_id: u64, iid: u64) -> Resu
     }
     if let Some(dir) = storage::default_dir() {
         if dir.exists() {
+            let key = storage::load_latest(&dir, project_id, iid)
+                .map(|r| r.snapshot)
+                .unwrap_or_default();
             storage::delete(&dir, project_id, iid)?;
+            // Another MR (same source branch) may share the snapshot; eviction reclaims it later otherwise.
+            if let Some(cache) = review::cache::default_dir().filter(|_| !key.is_empty()) {
+                if !storage::uses_snapshot(&dir, &key) {
+                    review::cache::remove(&cache, &key);
+                }
+            }
         }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn repo_cache_info() -> review::cache::CacheInfo {
+    review::cache::default_dir()
+        .map(|d| review::cache::info(&d))
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub fn clear_repo_cache(st: State<'_, AppState>) -> Result<()> {
+    if st.running.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err(crate::error::AppError::Agent(
+            "Wait for the agent to finish or cancel it first.".into(),
+        ));
+    }
+    if let Some(d) = review::cache::default_dir() {
+        review::cache::clear(&d);
     }
     Ok(())
 }
@@ -247,18 +303,16 @@ pub async fn start_review(
     } else {
         language
     };
-    // Repo context: read-only snapshot at the MR head, deleted when `snap` drops at the end of this fn.
+    // Repo context: read-only snapshot at the MR head, kept in the cache for this review's discussions.
     let snap = if repo_context {
-        let _ = on_event.send(ReviewEvent::Repo {
-            stage: "downloading".into(),
-            stats: None,
-        });
         let pid = mr.source_project_id.unwrap_or(project_id);
-        let fetch = review::repo::snapshot(&g, pid, &head_sha, s.repo_max_mb.max(1) * 1_048_576, &s.repo_exclude);
-        let snap = tokio::select! {
-            r = fetch => r?,
-            _ = rx.changed() => return Err(crate::error::AppError::Cancelled),
-        };
+        let snap = repo_snapshot(&g, &s, pid, &head_sha, &mut rx, || {
+            let _ = on_event.send(ReviewEvent::Repo {
+                stage: "downloading".into(),
+                stats: None,
+            });
+        })
+        .await?;
         let _ = on_event.send(ReviewEvent::Repo {
             stage: "ready".into(),
             stats: Some(snap.stats.clone()),
@@ -276,7 +330,7 @@ pub async fn start_review(
         known_features: (agent == AgentKind::Codex)
             .then(|| crate::agents::runner::codex_probe(std::path::Path::new(&info.path)).features),
         timeout: std::time::Duration::from_secs(s.agent_timeout_secs.max(30)),
-        repo: snap.as_ref().map(|x| x.root().to_path_buf()),
+        repo: snap.as_ref().map(|x| x.root.clone()),
     };
     let base = storage::StoredReview {
         project_id,
@@ -288,6 +342,7 @@ pub async fn start_review(
         language,
         scope: scope_file.clone().unwrap_or_else(|| "whole MR".into()),
         repo: snap.as_ref().map(|x| x.stats.clone()),
+        snapshot: snap.as_ref().map(|x| x.key.clone()).unwrap_or_default(),
         ..Default::default()
     };
     let emit = |e: ReviewEvent| {
@@ -322,7 +377,8 @@ fn valid_effort(agent: AgentKind, effort: &str) -> Option<String> {
     ok.then(|| effort.to_string())
 }
 
-/// One turn of a finding's discussion: the agent sees the finding, its file's diff and the thread so far (no tools).
+/// One turn of a finding's discussion: the agent sees the finding, its file's diff and the thread so far,
+/// plus (with `repo_context`) read-only tools in the snapshot of the reviewed commit.
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn discuss_finding(
@@ -334,6 +390,7 @@ pub async fn discuss_finding(
     agent: AgentKind,
     model: String,
     effort: String,
+    repo_context: bool,
     on_event: Channel<ThreadEvent>,
 ) -> Result<()> {
     use crate::agents::runner::AgentEvent;
@@ -366,20 +423,54 @@ pub async fn discuss_finding(
     let file = files
         .iter()
         .find(|d| d.new_path == finding.file || d.old_path == finding.file);
+    // The commit the finding was made on, even if the MR moved on: the finding's lines refer to it.
+    let snap = if repo_context {
+        let pid = mr.source_project_id.unwrap_or(project_id);
+        let miss = || {
+            let _ = on_event.send(ThreadEvent::Repo {
+                stage: "downloading".into(),
+            });
+        };
+        match repo_snapshot(&g, &s, pid, &stored.head_sha, &mut rx, miss).await {
+            Ok(x) => {
+                let _ = on_event.send(ThreadEvent::Repo { stage: "ready".into() });
+                Some(x)
+            }
+            Err(crate::error::AppError::Cancelled) => return Err(crate::error::AppError::Cancelled),
+            Err(e) => {
+                let _ = on_event.send(ThreadEvent::Notice {
+                    text: format!("Repo context unavailable ({e}). Answering from the diff only."),
+                });
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let root = snap.as_ref().map(|x| x.root.clone());
     let history = stored.threads.get(&index).cloned().unwrap_or_default();
-    let prompt = review::prompt::thread_user_prompt(&mr.title, &finding, file, &history, &message, s.max_review_bytes);
+    let prompt = review::prompt::thread_user_prompt(
+        &mr.title,
+        &finding,
+        file,
+        &history,
+        &message,
+        s.max_review_bytes,
+        root.as_deref().map(|r| (r, stored.head_sha.as_str())),
+    );
     let spec = RunSpec {
         kind: agent,
         bin: info.path.clone().into(),
         model: Some(model.clone()).filter(|m| !m.trim().is_empty()),
         effort: valid_effort(agent, &effort),
-        system_prompt: review::prompt::thread_system_prompt(&stored.language),
+        system_prompt: review::prompt::thread_system_prompt(&stored.language, agent, root.is_some()),
         known_features: (agent == AgentKind::Codex)
             .then(|| crate::agents::runner::codex_probe(std::path::Path::new(&info.path)).features),
         timeout: std::time::Duration::from_secs(s.agent_timeout_secs.max(30)),
-        repo: None,
+        repo: root.clone(),
     };
     let mut reply = String::new();
+    let mut activity = Vec::new();
     let mut failed = None;
     agents::runner::run(&spec, &prompt, &mut rx, |e| match e {
         AgentEvent::Text(t) => {
@@ -391,7 +482,13 @@ pub async fn discuss_finding(
             let _ = on_event.send(ThreadEvent::Usage { usage: u });
         }
         AgentEvent::Error(m) => failed = Some(m),
-        AgentEvent::Tool(..) => {}
+        AgentEvent::Tool(name, detail) => {
+            let text = review::tool_text(root.as_deref(), &name, &detail);
+            let _ = on_event.send(ThreadEvent::Activity { text: text.clone() });
+            if activity.len() < 200 {
+                activity.push(text);
+            }
+        }
     })
     .await?;
     if let Some(m) = failed {
@@ -414,12 +511,14 @@ pub async fn discuss_finding(
         text: message,
         at: now_secs(),
         by: String::new(),
+        activity: vec![],
     });
     thread.push(storage::ThreadMsg {
         role: "agent".into(),
         text: reply.trim().into(),
         at: now_secs(),
         by,
+        activity,
     });
     let thread = thread.clone();
     storage::save(&dir, &stored)?;

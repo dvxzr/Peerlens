@@ -32,6 +32,9 @@ pub struct StoredReview {
     /// Snapshot summary when repo context was used.
     #[serde(default)]
     pub repo: Option<super::repo::SnapshotStats>,
+    /// Cache key of that snapshot (review::cache), reused by finding discussions; "" = none.
+    #[serde(default)]
+    pub snapshot: String,
     /// Discussion threads keyed by finding index.
     #[serde(default)]
     pub threads: std::collections::BTreeMap<usize, Vec<ThreadMsg>>,
@@ -47,6 +50,9 @@ pub struct ThreadMsg {
     /// Agent / model that wrote an agent reply, e.g. "Claude / sonnet".
     #[serde(default)]
     pub by: String,
+    /// Tool calls the agent made for this reply (repo context), e.g. "Read src/a.py".
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub activity: Vec<String>,
 }
 
 pub fn default_dir() -> Option<PathBuf> {
@@ -86,6 +92,16 @@ pub fn delete(dir: &Path, project_id: u64, iid: u64) -> Result<usize> {
         }
     }
     Ok(n)
+}
+
+/// Whether any stored review still refers to snapshot `key`.
+pub fn uses_snapshot(dir: &Path, key: &str) -> bool {
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    rd.flatten()
+        .filter_map(|e| serde_json::from_slice::<StoredReview>(&std::fs::read(e.path()).ok()?).ok())
+        .any(|r| r.snapshot == key)
 }
 
 /// Latest stored review for the MR, whatever head it was made for (caller compares sha → stale).

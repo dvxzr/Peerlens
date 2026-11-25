@@ -31,6 +31,8 @@
   let panelW = $state(pref("panelW", 380));
   let panelOpen = $state(pref("panelOpen", true));
   let filesOpen = $state(pref("filesOpen", true));
+  let split = $state(pref("diffSplit", false)); // side-by-side diff
+  $effect(() => setPref("diffSplit", split));
   $effect(() => setPref("panelW", panelW));
   $effect(() => setPref("panelOpen", panelOpen));
   $effect(() => setPref("filesOpen", filesOpen));
@@ -165,6 +167,7 @@
         <button class:on={tab === "discussions"} onclick={() => (tab = "discussions")} title="Discussions ({kb('3')})"><Icon name="message" size={15} />Discussions{#if unresolved != null}<span class="cnt">{unresolved}</span>{/if}</button>
         {#if files}
           <span class="totals mono"><span class="add">+{totals[0]}</span> <span class="del">−{totals[1]}</span></span>
+          {#if tab !== "discussions"}<button class="ghost icon" class:active={split} onclick={() => (split = !split)} title="{split ? 'Unified' : 'Split'} diff view"><Icon name="columns" size={15} /></button>{/if}
           {#if tab === "changes"}<button class="ghost icon" class:active={filesOpen} onclick={() => (filesOpen = !filesOpen)} title="{filesOpen ? 'Hide' : 'Show'} file list"><Icon name="list" size={15} /></button>{/if}
         {/if}
       </nav>
@@ -191,12 +194,12 @@
                   {/each}
                 </div>
                 {/if}
-                <div class="diff"><DiffView bind:this={diffView} {files} {collapseLines} {markers} onmarker={(id) => panel?.reveal(id)} onfile={followFile} /></div>
+                <div class="diff"><DiffView bind:this={diffView} {files} {collapseLines} {split} {markers} onmarker={(id) => panel?.reveal(id)} onfile={followFile} /></div>
               </div>
             {/if}
           {:else if tab === "commits"}
             {#if !commits}<div class="loading">{#each [70, 60, 75] as w, i (i)}<div class="skeleton" style="height:14px;width:{w}%"></div>{/each}</div>
-            {:else}<Commits {commits} projectId={mr.project_id} {collapseLines} />{/if}
+            {:else}<Commits {commits} projectId={mr.project_id} {collapseLines} {split} />{/if}
           {:else}
             {#if !discussions}<div class="loading">{#each [70, 60, 75] as w, i (i)}<div class="skeleton" style="height:14px;width:{w}%"></div>{/each}</div>
             {:else}<Discussions {discussions} onjump={showFile} />{/if}

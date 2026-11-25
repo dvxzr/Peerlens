@@ -5,7 +5,7 @@
   import DiffView from "./DiffView.svelte";
   import Icon from "./Icon.svelte";
 
-  let { commits, projectId, collapseLines }: { commits: Commit[]; projectId: number; collapseLines: number } = $props();
+  let { commits, projectId, collapseLines, split }: { commits: Commit[]; projectId: number; collapseLines: number; split: boolean } = $props();
   let sel = $state<Commit | null>(null);
   let diff = $state<FileDiff[] | null>(null);
   let err = $state("");
@@ -38,7 +38,7 @@
     <div class="diff">
       {#if err}<div class="err pad">{err}</div>
       {:else if !diff}<div class="pad"><div class="skeleton" style="height:14px;width:60%"></div></div>
-      {:else}<DiffView files={diff} {collapseLines} />{/if}
+      {:else}<DiffView files={diff} {collapseLines} {split} />{/if}
     </div>
   {:else}
     <div class="hint dim">Pick a commit to see its changes.</div>

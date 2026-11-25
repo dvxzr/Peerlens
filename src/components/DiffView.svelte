@@ -3,8 +3,8 @@
   import { cached, highlightFile } from "../lib/highlight";
   import Icon from "./Icon.svelte";
 
-  let { files, collapseLines, markers = new Map(), onmarker, onfile }: {
-    files: FileDiff[]; collapseLines: number;
+  let { files, collapseLines, split = false, markers = new Map(), onmarker, onfile }: {
+    files: FileDiff[]; collapseLines: number; split?: boolean;
     markers?: Map<string, Marker[]>; /* keyed by `${path}:${newLine}` */ onmarker?: (id: number) => void;
     /** Called with the path of the file at the top of the viewport while scrolling. */
     onfile?: (path: string) => void;
@@ -13,11 +13,14 @@
   type Row =
     | { t: "file"; fi: number }
     | { t: "line"; fi: number; li: number; l: Line }
+    /** Split view: old line index `a` on the left, new line index `b` on the right (null = blank side). */
+    | { t: "pair"; fi: number; a: number | null; b: number | null }
     | { t: "note"; fi: number; text: string }
     | { t: "mark"; fi: number; m: Marker }
     | { t: "gap"; fi: number };
-  const H = { file: 36, line: 20, note: 30, mark: 24, gap: 12 };
+  const H = { file: 36, line: 20, pair: 20, note: 30, mark: 24, gap: 12 };
   const GUTTER = 122; // two 52px number columns + 18px sign
+  const HALF_GUTTER = 70; // split view: one 52px number column + 18px sign
 
   const path = (f: FileDiff) => f.new_path || f.old_path;
   const autoCollapsed = (f: FileDiff) => f.lines.length > collapseLines || f.generated;
@@ -32,6 +35,7 @@
   $effect(() => {
     files;
     toggled = new Set();
+    sx = 0;
     if (scroller) scroller.scrollTop = scroller.scrollLeft = 0;
   });
 
@@ -44,13 +48,40 @@
         const p = path(f);
         if (f.too_large || f.collapsed) rows.push({ t: "note", fi, text: "Diff is too large — GitLab did not send it. Open the MR in the browser." });
         else if (f.binary) rows.push({ t: "note", fi, text: "No text diff (binary or empty file)." });
+        const marks = (l: Line) => {
+          if (l.n != null && l.k !== "-") for (const m of markers.get(`${p}:${l.n}`) ?? []) rows.push({ t: "mark", fi, m });
+        };
+        // Split view: a run of removed lines sits beside the run of added lines that follows it.
+        let dels: number[] = [], adds: number[] = [];
+        const flush = () => {
+          for (let k = 0; k < Math.max(dels.length, adds.length); k++) {
+            const b = adds[k] ?? null;
+            rows.push({ t: "pair", fi, a: dels[k] ?? null, b });
+            if (b != null) marks(f.lines[b]);
+          }
+          dels = [];
+          adds = [];
+        };
         f.lines.forEach((l, li) => {
-          rows.push({ t: "line", fi, li, l });
           // Tabs render 4 wide; this sizes the scrollable width so all rows line up.
           const len = l.t.length + 3 * (l.t.split("\t").length - 1);
           if (len > maxLen) maxLen = len;
-          if (l.n != null && l.k !== "-") for (const m of markers.get(`${p}:${l.n}`) ?? []) rows.push({ t: "mark", fi, m });
+          if (!split) {
+            rows.push({ t: "line", fi, li, l });
+            marks(l);
+          } else if (l.k === "-") {
+            if (adds.length) flush(); // "+ then -" starts a new change block
+            dels.push(li);
+          } else if (l.k === "+") adds.push(li);
+          else {
+            flush();
+            if (l.k === " ") {
+              rows.push({ t: "pair", fi, a: li, b: li });
+              marks(l);
+            } else rows.push({ t: "line", fi, li, l });
+          }
         });
+        flush();
       }
       rows.push({ t: "gap", fi });
     });
@@ -71,10 +102,23 @@
 
   // Sideways scrolling handled explicitly so it works the same in every WebView:
   // horizontal trackpad swipes and Shift+wheel move the code, vertical scrolling stays native.
+  // Split view has no native sideways scroll: both halves shift their code together by `sx` px.
+  let sx = $state(0);
+  let ch100 = $state(720); // measured width of 100ch in the code font
+  let maxSx = $derived(Math.max(0, (layout.maxLen * ch100) / 100 + 34 - (viewW / 2 - HALF_GUTTER)));
+  $effect(() => {
+    if (sx > maxSx) sx = maxSx;
+  });
   function onWheel(e: WheelEvent) {
     if (!scroller) return;
     const dx = e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX;
     if (Math.abs(dx) <= Math.abs(e.shiftKey ? 0 : e.deltaY)) return;
+    if (split) {
+      if (maxSx <= 0) return;
+      e.preventDefault();
+      sx = Math.max(0, Math.min(maxSx, sx + dx * (e.deltaMode === 1 ? 20 : 1)));
+      return;
+    }
     const max = scroller.scrollWidth - scroller.clientWidth;
     if (max <= 0) return;
     e.preventDefault();
@@ -145,12 +189,17 @@
     queueMicrotask(() => {
       let y = layout.offs[layout.rows.findIndex((r) => r.t === "file" && r.fi === fi)];
       if (line != null) {
-        const j = layout.rows.findIndex((r) => r.t === "line" && r.fi === fi && r.l.n === line);
+        const j = layout.rows.findIndex((r) => r.fi === fi && newLine(r) === line);
         if (j >= 0) y = Math.max(y, layout.offs[j] - H.file - 6 * H.line);
       }
       if (scroller) scroller.scrollTo({ top: y, left: 0, behavior: Math.abs(scroller.scrollTop - y) < 4000 ? "smooth" : "auto" });
     });
   }
+  function newLine(r: Row) {
+    if (r.t === "line") return r.l.n;
+    return r.t === "pair" && r.b != null ? files[r.fi].lines[r.b].n : null;
+  }
+  const kind = (k: Line["k"]) => (k === "+" ? "a" : k === "-" ? "d" : k === "@" ? "h" : "c");
   const dir = (p: string) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/") + 1) : "");
   const base = (p: string) => p.slice(p.lastIndexOf("/") + 1);
 </script>
@@ -171,11 +220,26 @@
   </button>
 {/snippet}
 
-<div class="scroller" bind:this={scroller} bind:clientHeight={viewH} bind:clientWidth={viewW} onscroll={onScroll} style:--vw="{viewW}px">
+{#snippet code(fi: number, li: number, l: Line)}
+  {@const h = l.k === "@" || l.k === "\\" ? null : html(fi, li)}
+  <!-- `h` is highlight.js output: text is escaped by hljs and splitLines rejects any other markup. -->
+  {#if h !== null}<span class="code">{@html h}</span>{:else}<span class="code">{l.t}</span>{/if}
+{/snippet}
+
+{#snippet half(fi: number, li: number | null, side: "o" | "n")}
+  {@const l = li == null ? null : files[fi].lines[li]}
+  <div class="half k{l ? (l.k === ' ' ? 'c' : kind(l.k)) : 'e'}">
+    <span class="gut"><span class="num">{l?.[side] ?? ""}</span><span class="sign">{l && l.k !== " " ? l.k : ""}</span></span>
+    <span class="clip"><span class="shift">{#if l && li != null}{@render code(fi, li, l)}{/if}</span></span>
+  </div>
+{/snippet}
+
+<div class="scroller" class:split bind:this={scroller} bind:clientHeight={viewH} bind:clientWidth={viewW} onscroll={onScroll} style:--vw="{viewW}px" style:--sx="{-sx}px">
   {#if top?.pinned}
     <div class="pin"><div class="pin-in" style:transform="translateY({top.shift}px)">{@render header(top.fi)}</div></div>
   {/if}
-  <div class="inner" style:min-width="calc({GUTTER}px + {layout.maxLen}ch + 40px)">
+  <div class="inner" style:min-width={split ? null : `calc(${GUTTER}px + ${layout.maxLen}ch + 40px)`}>
+    <div class="chm" bind:clientWidth={ch100}></div>
     <div style:height="{win.top}px"></div>
     {#each layout.rows.slice(win.start, win.end) as r, i (win.start + i)}
       {#if r.t === "file"}
@@ -188,12 +252,12 @@
         </button>
       {:else if r.t === "gap"}
         <div class="gap"></div>
+      {:else if r.t === "pair"}
+        <div class="ln pair">{@render half(r.fi, r.a, "o")}{@render half(r.fi, r.b, "n")}</div>
       {:else}
-        {@const h = r.l.k === "@" || r.l.k === "\\" ? null : html(r.fi, r.li)}
-        <div class="ln k{r.l.k === '+' ? 'a' : r.l.k === '-' ? 'd' : r.l.k === '@' ? 'h' : 'c'}">
+        <div class="ln k{kind(r.l.k)}">
           <span class="gut"><span class="num">{r.l.o ?? ""}</span><span class="num">{r.l.n ?? ""}</span><span class="sign">{r.l.k === "@" || r.l.k === " " ? "" : r.l.k}</span></span>
-          <!-- `h` is highlight.js output: text is escaped by hljs and splitLines rejects any other markup. -->
-          {#if h !== null}<span class="code">{@html h}</span>{:else}<span class="code">{r.l.t}</span>{/if}
+          {@render code(r.fi, r.li, r.l)}
         </div>
       {/if}
     {/each}
@@ -249,4 +313,16 @@
   .mark:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 22%, var(--bg1)); }
   .mark:active:not(:disabled) { transform: none; }
   .mt { overflow: hidden; text-overflow: ellipsis; }
+  .chm { position: absolute; width: 100ch; height: 0; visibility: hidden; }
+  /* Split view: two fixed halves; code is clipped and shifted by --sx (see onWheel). */
+  .split .ln { width: var(--vw); overflow: hidden; }
+  .pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .half { display: flex; min-width: 0; }
+  .half + .half { border-left: 1px solid var(--border); }
+  .half .gut { position: static; width: 70px; }
+  .clip { flex: 1; min-width: 0; overflow: hidden; }
+  .shift { display: inline-block; transform: translateX(var(--sx)); }
+  .ke { background: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--text3) 8%, transparent) 6px 7px); }
+  .ke .gut { background: var(--bg1); }
+  .split .mark { padding-left: calc(var(--vw) / 2 + 67px); }
 </style>

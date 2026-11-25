@@ -5,25 +5,31 @@ A small, fast desktop app for reviewing your GitLab merge requests with an AI ag
 [Codex](https://github.com/openai/codex) through their CLIs and your existing subscription. It talks to GitLab only
 through [`glab`](https://gitlab.com/gitlab-org/cli), and only with read requests.
 
-![Peerlens: MR list, diff with inline findings, AI review panel with a finding discussion](docs/screenshot-dark.png)
+![Peerlens: MR list, diff with inline findings, AI review panel with the summary and a finding discussion](docs/screenshot-dark.png)
 
 ## Features
 
-- **Your MRs in one place.** Open MRs where you are assignee or reviewer, grouped by project, with filter, draft and
-  role badges. The list loads on start and when you press Refresh. Nothing polls in the background.
-- **Fast diff viewer.** Virtualized unified diff with syntax highlighting (languages load on demand), sticky file
-  headers, pinned line numbers, collapsed large or generated files.
+- **Your MRs in one place.** *Mine* shows open MRs where you are assignee or reviewer; *All* shows recently updated
+  open MRs in your groups (or one group set in Settings). Grouped by project, with filter, draft and role badges.
+  Lists load on start and on Refresh, and switching between Mine and All shows the last loaded list instantly.
+  Nothing polls in the background.
+- **Fast diff viewer.** Virtualized unified or split (side-by-side) diff with syntax highlighting (languages load on
+  demand), sticky file headers, pinned line numbers, collapsed large or generated files.
 - **Commits and discussions.** Per-commit diffs, threads with resolved filter, jump from a comment to its line,
   GitLab Markdown and emoji rendered safely.
-- **AI review.** Pick the agent, model, reasoning effort, scope and language from one compact line. Findings stream
-  in with severity, explanation, the problematic snippet and a suggested fix with a Copy button. They are grouped by
-  file, shown inline in the diff and can be filtered by severity. Large MRs are reviewed file by file; lock, binary
-  and generated files are skipped and listed.
-- **Reviewer notes.** Optionally tell the agent what the change is about and what to focus on or skip. Notes are kept
-  per MR and sent as a separate trusted block; the MR description is already included.
+- **AI review.** Pick the agent, model, reasoning effort, scope and language from one compact line. The verdict
+  summary sits on top; findings stream in with severity, explanation, the problematic snippet and a suggested fix
+  with a Copy button. They are grouped by file, shown inline in the diff and can be filtered by severity. Large MRs
+  are reviewed file by file; lock, binary and generated files are skipped and listed.
+- **Hand a finding to your coding agent.** The copy icon on each finding copies it as Markdown: file and lines,
+  explanation, code, the suggested fix and the whole discussion, with a reminder to verify it before changing code.
+- **Reviewer notes.** Tell the agent what the change is about and what to focus on or skip, or paste the task with
+  its acceptance criteria: the agent checks the change against them. Pasted text (e.g. from Jira) is cleaned of
+  extra indentation and blank lines so it doesn't eat the limit. Notes are kept per MR and sent as a separate
+  trusted block; the MR description is already included.
 - **Discuss a finding.** Open a thread under any finding and argue with the agent about it. It sees the finding, the
-  diff of its file, the thread and (with Repo on) the repository at the reviewed commit, and can defend, correct or
-  withdraw it. Threads are saved with the review.
+  diff of its file, the thread and (with Repo on) the repository at the reviewed commit. It answers with its decision
+  first (still valid, downgraded, withdrawn) and checks fixes you propose. Threads are saved with the review.
 - **Optional repo context.** The agent can read a read-only snapshot of the repository at the MR head
   to check callers, definitions and tests. Finding discussions can read the same snapshot (the reviewed commit).
   Snapshots stay in a local cache (2 GB by default, least recently used removed first, unused ones after 14 days).
@@ -37,9 +43,9 @@ through [`glab`](https://gitlab.com/gitlab-org/cli), and only with read requests
   with one click (signed and verified). Peerlens never checks in the background.
 - Dark and light themes, keyboard shortcuts, and a small footprint: about 4 MB binary and ~0% CPU when idle.
 
-<details><summary>Light theme</summary>
+<details><summary>Light theme, split diff</summary>
 
-![Light theme](docs/screenshot-light.png)
+![Light theme with the split diff view](docs/screenshot-light.png)
 
 </details>
 
@@ -128,6 +134,7 @@ See [SECURITY.md](SECURITY.md) for the full security model and its limitations.
 |---|---|---|
 | Settings | `~/Library/Application Support/peerlens/settings.json` | `~/.config/peerlens/settings.json` |
 | Saved reviews | `~/Library/Application Support/peerlens/reviews/` | `~/.local/share/peerlens/reviews/` |
+| Repo snapshots | `~/Library/Caches/peerlens/snapshots/` | `~/.cache/peerlens/snapshots/` |
 
 | Setting | Default |
 |---|---|
@@ -141,9 +148,9 @@ See [SECURITY.md](SECURITY.md) for the full security model and its limitations.
 | Pause when Claude usage reaches | 80% |
 | Max reviews per hour / agent runs per review / pause between parts | 20 / 25 / 3 s |
 | Repo context archive limit | 300 MB |
-| Repo snapshot cache | 2 GB |
+| Repo snapshot cache | 2 GB (Settings → Repo context → Clear empties it) |
 | Never unpack (repo context) | `.env*`, `*.pem`, `*.key`, `*secret*`, `*credential*`, … |
-| GitLab host, binary paths | glab's default host; auto-detect |
+| GitLab host, group for "All", binary paths | glab's default host; all your groups; auto-detect |
 
 ## Shortcuts
 
@@ -157,7 +164,7 @@ On Linux use Ctrl instead of ⌘.
 | ⌘↵ | Start review |
 | ⌘B / ⌘J | Toggle the MR sidebar / the review panel |
 | ⌘, | Settings |
-| Shift + wheel | Scroll the diff sideways (trackpad swipes work too) |
+| Shift + wheel | Scroll the diff sideways (trackpad swipes work too; in split view both sides move together) |
 
 ## Development
 
@@ -186,7 +193,7 @@ Layout:
 src-tauri/src/
   gitlab/      the only place glab runs (GET-only), API calls, models
   agents/      agent detection, read-only runners for Claude Code and Codex, tolerant output parser
-  review/      chunking, prompt, repo snapshot, saved reviews
+  review/      chunking, prompt, repo snapshot and its cache, saved reviews
   diff.rs      unified diff parser
   platform.rs  OS-specific code (binary lookup, process groups, opening URLs)
 src/           Svelte 5 UI (no UI kit; custom diff renderer, Markdown renderer, icons)
@@ -212,13 +219,14 @@ scripts/       app icon source (swift scripts/icon.swift icon.png && pnpm tauri 
    python3 scripts/release.py bump 0.2.0
    git commit -am "chore: release 0.2.0" && git tag v0.2.0 && git push origin main v0.2.0
    ```
-3. The release workflow builds macOS and Linux packages, writes the changelog from the `feat:`/`fix:` commits since
-   the previous tag, signs the update bundles and uploads `latest.json` to a **draft** release. Review it and
-   publish; installed apps see the update only after that.
+3. The release workflow builds macOS and Linux packages, writes the changelog from the `feat:`/`fix:`/`perf:`
+   commits since the previous tag, signs the update bundles and uploads `latest.json` to a **draft** release. Tests
+   run once, in parallel with the builds; if they fail, `latest.json` is not uploaded. Check that the run is green,
+   review the draft and publish; installed apps see the update only after that.
 
 ## Roadmap
 
-Split diff view, GitHub support, optional auto-refresh, signed and notarized macOS builds, Linux ARM builds.
+GitHub support, optional auto-refresh, signed and notarized macOS builds, Linux ARM builds.
 
 ## License
 

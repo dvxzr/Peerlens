@@ -13,6 +13,7 @@
   import Icon from "./Icon.svelte";
   import Rich from "./Rich.svelte";
   import { CLAUDE_MODELS, EFFORTS, LANGUAGES, codexEfforts } from "../lib/options";
+  import { pasteSqueezed } from "../lib/text";
 
   let { projectId, iid, headSha, agents, settings, currentFile, onjump }: {
     projectId: number; iid: number; headSha: string; agents: AgentInfo[]; settings: Settings;
@@ -273,7 +274,7 @@
           {#if r.chatError?.index === i}<div class="warn"><Icon name="alert" size={14} /><span>{r.chatError.message}</span></div>{/if}
           {#if threadErr}<div class="warn"><Icon name="alert" size={14} /><span>{threadErr}</span></div>{/if}
           <div class="tinp">
-            <textarea bind:value={draft} oninput={grow} rows="2" maxlength={4000} placeholder="Reply about this finding…" spellcheck="false"
+            <textarea bind:value={draft} oninput={grow} onpaste={pasteSqueezed} rows="2" maxlength={4000} placeholder="Reply about this finding…" spellcheck="false"
               onkeydown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); e.stopPropagation(); send(i); } }}></textarea>
             <div class="tbar">
               <span class="dim">{agent === "claude" ? "Claude" : "Codex"} · {modelLabel}</span>
@@ -351,7 +352,7 @@
         </div>
         {#if notesOpen}
           <div class="notes" role="group" aria-label="Reviewer notes" onfocusout={notesBlur}>
-            <textarea bind:this={notesEl} onkeydown={(e) => e.key === "Escape" && (notesOpen = false)} bind:value={notes} oninput={saveNotes} rows="3" maxlength={MAX_NOTES} spellcheck="false"
+            <textarea bind:this={notesEl} onkeydown={(e) => e.key === "Escape" && (notesOpen = false)} bind:value={notes} oninput={saveNotes} onpaste={pasteSqueezed} rows="3" maxlength={MAX_NOTES} spellcheck="false"
               placeholder="Task description, what to focus on, what to skip…"></textarea>
             <div class="nbar">
               <span class="ncount mono">{notes.length} / {MAX_NOTES}</span>

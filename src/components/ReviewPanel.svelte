@@ -383,7 +383,7 @@
   <div class="results">
     {#if r && (r.createdAt || r.running)}
       <div class="meta">
-        {#if r.createdAt}<span class="dim">{r.meta} · {ago(r.createdAt)}</span>{/if}
+        {#if r.createdAt}<span class="dim mtxt" title={r.meta}>{r.meta} · {ago(r.createdAt)}</span>{/if}
         {#if stale}<span class="pill stale" title="The MR head changed since this review"><Icon name="clock" size={11} />stale</span>{/if}
         {#if r.cancelled}<span class="pill">cancelled</span>{/if}
         {#if !r.running && r.createdAt}
@@ -512,8 +512,11 @@
   .fill { display: block; height: 100%; background: var(--green); border-radius: 3px; transition: width 400ms var(--ease); }
   .fill.warm { background: var(--yellow); } .fill.hot { background: var(--red); }
   .results { overflow-y: auto; flex: 1; padding: 12px 14px 24px; }
-  .meta { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 11.5px; margin-bottom: 8px; }
-  .del { margin-left: auto; padding: 2px 8px; font-size: 11.5px; gap: 5px; color: var(--text3); }
+  /* One row: the info text truncates so the Delete button never jumps when its label grows. */
+  .meta { display: flex; gap: 6px; align-items: center; font-size: 11.5px; margin-bottom: 8px; }
+  .meta > :global(*) { flex: none; }
+  .meta > .mtxt { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .del { margin-left: auto; padding: 2px 8px; font-size: 11.5px; gap: 5px; color: var(--text3); white-space: nowrap; }
   .del:hover:not(:disabled) { color: var(--red); }
   .del.confirm { color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); }
   .tabs { display: flex; gap: 2px; margin: 0 -2px 8px; border-bottom: 1px solid var(--border); overflow-x: auto; }

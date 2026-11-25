@@ -189,13 +189,39 @@
     confirmDelete = false;
     try { await remove(projectId, iid); delErr = ""; } catch (e) { delErr = String(e); }
   }
-  let copied = $state<number | null>(null);
-  async function copy(text: string, i: number) {
+  let copied = $state<string | null>(null); // "code-3" / "card-3"
+  async function copy(text: string, key: string) {
     try {
       await navigator.clipboard.writeText(text);
-      copied = i;
-      setTimeout(() => copied === i && (copied = null), 1400);
+      copied = key;
+      setTimeout(() => copied === key && (copied = null), 1400);
     } catch { /* clipboard unavailable */ }
+  }
+  // A code fence longer than any backtick run inside, so pasted code cannot close it early.
+  const fence = (code: string, lang = "") => {
+    const ticks = "`".repeat(Math.max(3, ...(code.match(/`+/g) ?? []).map((m) => m.length + 1)));
+    return `${ticks}${lang}\n${code.replace(/\n+$/, "")}\n${ticks}`;
+  };
+  /** The finding (and its discussion) as Markdown to hand to another agent. */
+  function findingText(f: Finding, i: number) {
+    const lines = f.start_line == null ? "" : `, lines ${f.start_line}${f.end_line && f.end_line !== f.start_line ? `–${f.end_line}` : ""}`;
+    const out = [
+      `## Code review finding: ${f.title}`,
+      `${f.file ? `File: \`${f.file}\`${lines}` : "Not tied to a file"}${r?.headSha ? ` (commit ${r.headSha.slice(0, 8)})` : ""}`,
+      `Severity: ${f.severity} · ${f.category}`,
+      "",
+      f.explanation,
+    ];
+    if (f.snippet) out.push("", "Problematic code:", fence(f.snippet));
+    if (f.suggestion?.description) out.push("", `Suggested fix: ${f.suggestion.description}`);
+    if (f.suggestion?.code) out.push("", fence(f.suggestion.code));
+    const thread = r?.threads[i] ?? [];
+    if (thread.length) {
+      out.push("", "Discussion of this finding:");
+      for (const m of thread) out.push("", `**${m.role === "user" ? "Developer" : "Reviewer"}:** ${m.text.trim()}`);
+    }
+    out.push("", "This finding comes from an automated review. Verify it against the current code before changing anything; the suggested fix was not run.");
+    return out.join("\n");
   }
   /** Scroll the panel to a finding (used by inline diff markers). */
   export function reveal(i: number) {
@@ -216,6 +242,10 @@
           {f.file.split("/").pop()}{f.start_line != null ? `:${f.start_line}${f.end_line && f.end_line !== f.start_line ? "–" + f.end_line : ""}` : ""}
         </button>
       {/if}
+      <button class="ghost icon fcopy" class:done={copied === `card-${i}`} onclick={() => copy(findingText(f, i), `card-${i}`)}
+        title={copied === `card-${i}` ? "Copied" : "Copy this finding as Markdown for an agent"} aria-label="Copy finding">
+        <Icon name={copied === `card-${i}` ? "check" : "copy"} size={13} />
+      </button>
     </div>
     <div class="ftitle"><Rich text={f.title} /></div>
     <div class="text"><Rich text={f.explanation} /></div>
@@ -228,8 +258,8 @@
           <div class="codewrap">
             <div class="codebar">
               <span>Suggested code</span>
-              <button class="copy" class:done={copied === i} onclick={() => copy(f.suggestion!.code, i)} title="Copy code">
-                <Icon name={copied === i ? "check" : "copy"} size={13} />{copied === i ? "Copied" : "Copy"}
+              <button class="copy" class:done={copied === `code-${i}`} onclick={() => copy(f.suggestion!.code, `code-${i}`)} title="Copy code">
+                <Icon name={copied === `code-${i}` ? "check" : "copy"} size={13} />{copied === `code-${i}` ? "Copied" : "Copy"}
               </button>
             </div>
             <pre class="code good">{f.suggestion.code}</pre>
@@ -559,6 +589,9 @@
   .card:global(.flash) { box-shadow: 0 0 0 2px var(--accent); }
   .head { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .cat { font-size: 11px; color: var(--text3); }
+  .fcopy { margin-left: auto; width: 24px; height: 22px; color: var(--text3); }
+  .loc ~ .fcopy { margin-left: 0; }
+  .fcopy.done { color: var(--green); }
   .loc { margin-left: auto; padding: 1px 7px; border: none; background: var(--bg3); color: var(--accent); font-size: 11px; border-radius: 6px; }
   .ftitle { font-weight: 600; margin: 6px 0 2px; line-height: 1.35; }
   .text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; color: var(--text); line-height: 1.5; }

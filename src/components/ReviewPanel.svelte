@@ -451,6 +451,10 @@
           <div class="acts">{#each r.activity as a, i (i)}<div class="act mono">{a}</div>{/each}</div>
         </details>
       {/if}
+      {#if r.summaries.length}
+        <div class="group sumh"><Icon name="checkCircle" size={13} />Summary</div>
+        {#each r.summaries as s, i (i)}<div class="summary" in:fade={{ duration: 200 }}><Rich text={s} /></div>{/each}
+      {/if}
       {#if counts.length}
         <div class="tabs" role="tablist">
           <button class:on={!sev} role="tab" aria-selected={!sev} onclick={() => (sev = null)}>All <span class="dim">{r.findings.length}</span></button>
@@ -467,10 +471,6 @@
       {#if unanchored.length}
         <div class="group"><Icon name="target" size={13} />Not tied to diff lines</div>
         {#each unanchored as { f, i } (i)}{@render card(f, i)}{/each}
-      {/if}
-      {#if r.summaries.length}
-        <div class="group"><Icon name="checkCircle" size={13} />Summary</div>
-        {#each r.summaries as s, i (i)}<div class="summary" in:fade={{ duration: 200 }}><Rich text={s} /></div>{/each}
       {/if}
       {#if r.raw}
         <div class="group"><Icon name="terminal" size={13} />Raw agent output</div>
@@ -642,7 +642,8 @@
   .tacts summary { cursor: pointer; display: flex; align-items: center; gap: 5px; color: var(--text3); list-style: none; }
   .tacts .act { padding-left: 16px; }
   .tnote { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text3); }
-  .summary { background: var(--bg2); border: 1px solid var(--border); padding: 10px 12px; border-radius: 11px; white-space: pre-wrap; line-height: 1.5; }
+  .sumh { margin-top: 0; }
+  .summary { margin-bottom: 10px; background: var(--bg2); border: 1px solid var(--border); padding: 10px 12px; border-radius: 11px; white-space: pre-wrap; line-height: 1.5; }
   .warn { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 9px; color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); font-size: 12px; margin-bottom: 6px; overflow-wrap: anywhere; }
   .warn :global(svg) { flex: none; margin-top: 1px; }
   .skipped { margin-top: 14px; font-size: 12px; }

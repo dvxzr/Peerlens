@@ -128,6 +128,32 @@ pub fn open_url(url: &str) -> std::io::Result<()> {
     std::process::Command::new(opener).arg(url).spawn().map(|_| ())
 }
 
+/// macOS: open the app bundle again once this process has exited. Opening it while we still run
+/// (`open -n`, what `AppHandle::restart` does) starts a second instance that the Dock shows as a separate icon.
+#[cfg(target_os = "macos")]
+pub fn reopen_after_exit(bundle: &Path) -> std::io::Result<()> {
+    spawn_reopen(std::process::id(), bundle.as_os_str(), "/usr/bin/open").map(|_| ())
+}
+
+/// Detached `sh` that waits (up to ~10 s) for `pid` to exit, then runs `opener target`.
+/// pid, target and opener are arguments, never part of the script text.
+#[cfg(target_os = "macos")]
+fn spawn_reopen(pid: u32, target: &std::ffi::OsStr, opener: &str) -> std::io::Result<std::process::Child> {
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+    const WAIT_THEN_OPEN: &str =
+        r#"i=0; while kill -0 "$1" 2>/dev/null && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i+1)); done; exec "$3" "$2""#;
+    std::process::Command::new("/bin/sh")
+        .args(["-c", WAIT_THEN_OPEN, "sh", &pid.to_string()])
+        .arg(target)
+        .arg(opener)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .process_group(0) // outlives us and our Cancel kill
+        .spawn()
+}
+
 /// A fresh empty directory under the system temp dir; removed on drop.
 pub struct TempDir(pub PathBuf);
 
@@ -167,5 +193,37 @@ pub fn cleanup_stale_temp() {
                 std::fs::remove_file(&p)
             };
         }
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn reopen_waits_for_the_process_to_exit() {
+        // A: nothing to wait for (no such pid), so it runs `sleep 0.6` right away.
+        let mut a = spawn_reopen(999_999_999, "0.6".as_ref(), "/bin/sleep").unwrap();
+        let a_pid = a.id();
+        // Reap A when it exits; an unreaped zombie would still answer `kill -0`.
+        let reaper = std::thread::spawn(move || a.wait());
+        let t = Instant::now();
+        // B: waits for A, then runs `true`.
+        let status = spawn_reopen(a_pid, "x".as_ref(), "/usr/bin/true")
+            .unwrap()
+            .wait()
+            .unwrap();
+        let waited = t.elapsed();
+        assert!(status.success());
+        assert!(reaper.join().unwrap().unwrap().success());
+        assert!(
+            waited >= Duration::from_millis(400),
+            "opened before the old process exited: {waited:?}"
+        );
+        assert!(
+            waited < Duration::from_secs(5),
+            "kept waiting after it exited: {waited:?}"
+        );
     }
 }

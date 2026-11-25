@@ -3,7 +3,7 @@
 //! Network access happens only when the user presses "Check for updates" or "Update & restart".
 use crate::error::{AppError, Result};
 use serde::Serialize;
-use tauri::{ipc::Channel, AppHandle};
+use tauri::{ipc::Channel, AppHandle, Manager};
 use tauri_plugin_updater::UpdaterExt;
 
 const RELEASES: &str = "https://github.com/dvxzr/Peerlens/releases";
@@ -80,5 +80,22 @@ pub async fn install(app: &AppHandle, progress: &Channel<UpdateProgress>) -> Res
     )
     .await
     .map_err(err)?;
+    // macOS: reopen only after we have quit, so the Dock keeps its pinned icon (see platform::reopen_after_exit).
+    #[cfg(target_os = "macos")]
+    {
+        let bundle = tauri::process::current_binary(&app.env())
+            .ok()
+            .and_then(|b| b.ancestors().nth(3).map(std::path::Path::to_path_buf)) // X.app/Contents/MacOS/x
+            .filter(|p| p.extension().is_some_and(|e| e == "app"));
+        if let Some(bundle) = bundle {
+            match crate::platform::reopen_after_exit(&bundle) {
+                Ok(()) => {
+                    app.exit(0);
+                    return Ok(());
+                }
+                Err(e) => tracing::warn!(error = %e, "reopen after exit failed, restarting directly"),
+            }
+        }
+    }
     app.restart()
 }

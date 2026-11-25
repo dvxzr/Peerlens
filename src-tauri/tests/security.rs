@@ -53,8 +53,8 @@ fn platform_spawns_only_shell_lookup_and_url_opener() {
     let (_, code) = sources().into_iter().find(|(r, _)| r == "platform.rs").unwrap();
     assert_eq!(
         code.matches("Command::new").count(),
-        2,
-        "login-shell lookup + opener only"
+        3,
+        "login-shell lookup + URL opener + macOS reopen after update only"
     );
     assert!(
         code.contains("starts_with(\"https://\")"),

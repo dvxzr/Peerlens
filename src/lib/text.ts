@@ -1,19 +1,24 @@
-/** Pasted text (e.g. a Jira task) without the whitespace that eats a char limit: common indentation,
- * trailing spaces, runs of spaces inside lines and runs of blank lines. Relative indentation is kept. */
+/** Pasted text (e.g. a Jira task) without the whitespace that eats a char limit: indentation is cut to
+ * 2 spaces per nesting level, runs of spaces become one, and blank lines go (or shrink to one between
+ * paragraphs when the text is not double-spaced). */
 export function squeeze(t: string): string {
   const lines = t
     .replace(/\r\n?/g, "\n")
-    .replace(/[   ]/g, " ")
-    .replace(/[​﻿]/g, "")
+    .replace(/[\u200b-\u200d\u2060\ufeff]/g, "")
+    .replace(/[^\S\n]/g, " ") // tabs, no-break and other Unicode spaces
     .split("\n")
-    .map((l) => l.replace(/\s+$/, ""));
-  const indents = lines.filter(Boolean).map((l) => /^[ \t]*/.exec(l)![0].length);
-  const cut = indents.length ? Math.min(...indents) : 0;
-  return lines
-    .map((l) => l.slice(cut).replace(/(\S)[ \t]{2,}/g, "$1 "))
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .map((l) => l.trimEnd());
+  const indent = (l: string) => l.length - l.trimStart().length;
+  // Each distinct indent width becomes one 2-space level: nesting is kept, the width is not.
+  const widths = [...new Set(lines.filter(Boolean).map(indent))].sort((a, b) => a - b);
+  const text = lines
+    .map((l) => l && "  ".repeat(widths.indexOf(indent(l))) + l.trimStart().replace(/ {2,}/g, " "))
+    .join("\n");
+  // Copied rich text often puts a blank line after every line; then blank lines carry no structure.
+  const core = text.trim();
+  const gaps = core.match(/\n\n+/g)?.length ?? 0;
+  const doubleSpaced = gaps >= (lines.filter(Boolean).length - 1) / 2;
+  return core.replace(doubleSpaced ? /\n\n+/g : /\n{3,}/g, doubleSpaced ? "\n" : "\n\n");
 }
 
 /** onpaste for a textarea: inserts the squeezed text; plain paste when there is nothing to squeeze. */

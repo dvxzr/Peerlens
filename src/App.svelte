@@ -25,12 +25,17 @@
 
   const applyTheme = (t: string) => (document.documentElement.dataset.theme = t || "dark");
 
+  // Last loaded list per scope: switching Mine/All shows it instantly; only Refresh re-fetches.
+  const lists = new Map<boolean, { mrs: MrSummary[]; at: number }>();
+
   async function refresh() {
     loading = true;
     error = "";
+    const all = showAll;
     try {
-      mrs = (await api.listMyMrs(showAll)).mrs;
-      refreshedAt = Date.now();
+      const l = { mrs: (await api.listMyMrs(all)).mrs, at: Date.now() };
+      lists.set(all, l);
+      if (all === showAll) ({ mrs, at: refreshedAt } = l);
     } catch (e) {
       error = errText(e);
     } finally {
@@ -38,10 +43,20 @@
     }
   }
 
+  function setScope(all: boolean) {
+    showAll = all;
+    setPref("showAllMrs", all);
+    const l = lists.get(all);
+    if (!l) return refresh();
+    error = "";
+    ({ mrs, at: refreshedAt } = l);
+  }
+
   async function saveSettings(s: Settings) {
     try {
       await api.saveSettings(s);
       settings = s;
+      lists.clear(); // host or "All" group may have changed
       applyTheme(s.theme);
       showSettings = false;
       agents = await api.detectAgents(); // paths may have changed
@@ -81,7 +96,7 @@
 <div class="layout" style:grid-template-columns={sidebarOpen ? `${sidebarW}px 1px minmax(0,1fr)` : "minmax(0,1fr)"}>
   {#if sidebarOpen}
     <Sidebar {mrs} {loading} {error} {refreshedAt} {selected} {showAll} onselect={(m) => (selected = m)} onrefresh={refresh}
-      onscope={(all) => { showAll = all; setPref("showAllMrs", all); refresh(); }}
+      onscope={setScope}
       onsettings={() => (showSettings = true)} onhide={toggleSidebar} />
     <div class="resizer" role="separator" aria-orientation="vertical" onpointerdown={drag}></div>
   {/if}

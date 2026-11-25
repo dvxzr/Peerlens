@@ -2,7 +2,9 @@ name: ci
 on:
   push:
     branches: [main]
+    paths-ignore: ["**.md", "docs/**", "LICENSE"]
   pull_request:
+    paths-ignore: ["**.md", "docs/**", "LICENSE"]
 
 permissions:
   contents: read
@@ -31,6 +33,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          # Shared with the release workflow's test job; tags can read only caches saved on main.
+          shared-key: dev
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: pnpm/action-setup@v4
         with:
           version: 12
@@ -39,10 +44,14 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: python3 scripts/release.py self-test
-      - run: pnpm check
-      - run: pnpm build
-      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      # Platform-independent checks run once, on Linux.
+      - if: runner.os == 'Linux'
+        run: python3 scripts/release.py self-test
+      - if: runner.os == 'Linux'
+        run: pnpm check
+      - if: runner.os == 'Linux'
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - run: pnpm build # tauri::generate_context! needs dist/ to compile
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      # Also builds the app binary (integration tests need it), so no separate cargo build.
       - run: cargo test --manifest-path src-tauri/Cargo.toml
-      - run: cargo build --manifest-path src-tauri/Cargo.toml

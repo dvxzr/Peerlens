@@ -1,7 +1,7 @@
 {
   "name": "peerlens",
   "private": true,
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "Desktop app for reviewing GitLab merge requests with a local, read-only AI agent",
   "license": "MIT",
   "type": "module",

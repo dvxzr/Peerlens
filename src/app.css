@@ -37,8 +37,8 @@
   }
 }
 :root {
-  --ease: cubic-bezier(.2, .8, .2, 1);
-  --t: 140ms;
+  --ease: cubic-bezier(.22, 1, .36, 1);
+  --t: 220ms;
   --radius: 10px;
   --mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, "JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", Consolas, monospace;
 }
@@ -61,7 +61,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 button {
   display: inline-flex; align-items: center; gap: 6px; justify-content: center;
   background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 5px 11px; cursor: pointer;
-  transition: background-color var(--t) var(--ease), border-color var(--t) var(--ease), color var(--t) var(--ease), transform 90ms var(--ease), opacity var(--t);
+  transition: background-color var(--t) var(--ease), border-color var(--t) var(--ease), color var(--t) var(--ease), transform 140ms var(--ease), opacity var(--t), box-shadow var(--t) var(--ease);
   user-select: none; -webkit-user-select: none;
 }
 button:hover:not(:disabled) { background: var(--bg4); }

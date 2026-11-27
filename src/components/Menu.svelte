@@ -55,7 +55,7 @@
   </button>
   {#if open}
     <div class="pop" class:right={align === "right"} style:min-width={width ? `${width}px` : undefined}
-      transition:scale={{ start: 0.96, duration: 130, easing: cubicOut }}>
+      transition:scale={{ start: 0.96, duration: 200, easing: cubicOut }}>
       <div class="list" role="listbox" tabindex="-1" bind:this={list} onkeydown={key}>
         {#each items as it, i (it.value)}
           <button class="opt" class:active={i === active} class:sel={it.value === value} disabled={it.disabled}

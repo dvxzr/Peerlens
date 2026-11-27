@@ -11,3 +11,9 @@ export function ago(iso: string | number, now = Date.now()): string {
 }
 
 export const fmtDate = (iso: string) => new Date(iso).toLocaleString();
+
+/** Compact age for tight rows: "now", "25m", "3h", "2d", "5w". */
+export function agoShort(iso: string | number, now = Date.now()): string {
+  const m = Math.max(0, Math.round((now - new Date(iso).getTime()) / 60000));
+  return m < 1 ? "now" : m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : m < 1440 * 14 ? `${Math.round(m / 1440)}d` : `${Math.round(m / 10080)}w`;
+}

@@ -150,7 +150,7 @@
         <span class="by"><span class="av" style:background={avatarColor(mr.author.username)}>{initials(mr.author)}</span>{mr.author.name || mr.author.username}<span class="dim">· {ago(mr.updated_at)}</span></span>
         <span class="br mono"><Icon name="branch" size={12} />{mr.source_branch}<Icon name="arrowRight" size={11} />{mr.target_branch}</span>
         {#if details}
-          <span class="pills" in:fade={{ duration: 150 }}>
+          <span class="pills" in:fade={{ duration: 240 }}>
             {#if details.draft}<span class="pill draft">Draft</span>{/if}
             <span class="pill">{details.state}</span>
             {#if details.detailed_merge_status}<span class="pill {details.detailed_merge_status}">{details.detailed_merge_status.replaceAll("_", " ")}</span>{/if}
@@ -175,7 +175,7 @@
     {#if err}<div class="error"><Icon name="alert" size={14} /><span>{err}</span></div>{/if}
     <section>
       {#key tab}
-        <div class="tabbody" in:fade={{ duration: 120 }}>
+        <div class="tabbody" in:fade={{ duration: 200 }}>
           {#if tab === "changes"}
             {#if !files}
               <div class="loading">{#each [80, 60, 90, 70, 50, 85] as w, i (i)}<div class="skeleton" style="height:14px;width:{w}%"></div>{/each}</div>

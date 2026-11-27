@@ -1,9 +1,11 @@
 <script lang="ts">
   import { kb } from "../lib/platform";
   import type { MrSummary } from "../lib/types";
-  import { ago } from "../lib/time";
+  import { ago, agoShort } from "../lib/time";
   import Icon from "./Icon.svelte";
   import { pref, setPref } from "../lib/prefs";
+  import { slide } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
   import { updates } from "../lib/updates.svelte";
   import { ensureLoaded, get } from "../lib/review.svelte";
   import { avatarColor, initials, worstSeverity } from "../lib/text";
@@ -105,6 +107,7 @@
         <span class="count">{items.length}</span>
       </button>
       {#if isOpen(proj)}
+        <div transition:slide={{ duration: 240, easing: cubicOut }}>
         {#each items as m (m.project_id + ":" + m.iid)}
           {@const sel = selected?.project_id === m.project_id && selected?.iid === m.iid}
           {@const fs = findings(m)}
@@ -113,13 +116,14 @@
             <div class="meta">
               <span class="av" style:background={avatarColor(m.author.username)}>{initials(m.author)}</span>
               <span class="who">{m.author.username}</span>
-              <span class="when">· {ago(m.updated_at, now)}</span>
+              <span class="when" title={ago(m.updated_at, now)}>· {agoShort(m.updated_at, now)}</span>
               <span class="branch mono"><Icon name="arrowRight" size={10} />{m.target_branch}</span>
               {#if fs}<span class="fb sev-{fs.worst}" title="{fs.n} review finding{fs.n === 1 ? '' : 's'}">{fs.n}</span>{/if}
               <span class="mono iid">!{m.iid}</span>
             </div>
           </button>
         {/each}
+        </div>
       {/if}
     {:else}
       {#if !loading && !error}<div class="empty dim">{mrs.length ? "Nothing matches the filter." : "No open merge requests."}</div>{/if}

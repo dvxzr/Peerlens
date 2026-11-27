@@ -110,6 +110,7 @@
     if (sx > maxSx) sx = maxSx;
   });
   function onWheel(e: WheelEvent) {
+    target = -1;
     if (!scroller) return;
     const dx = e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX;
     if (Math.abs(dx) <= Math.abs(e.shiftKey ? 0 : e.deltaY)) return;
@@ -158,8 +159,11 @@
     return { fi: r.fi, shift, pinned: !(r.t === "file" && layout.offs[i] >= scrollTop - 1) && r.t !== "gap" };
   });
   let lastFile = -1;
+  let target = -1; // file a jump asked for; it wins over "at the bottom" until the user scrolls
   $effect(() => {
-    const fi = top?.fi ?? -1;
+    // Files near the end can't reach the top edge: at the bottom the last one (or the jump target) is current.
+    const atBottom = scrollTop > 0 && scrollTop + viewH >= layout.offs[layout.rows.length] - 2;
+    const fi = atBottom ? (target >= 0 ? target : files.length - 1) : top?.fi ?? -1;
     if (fi >= 0 && fi !== lastFile && files[fi]) {
       lastFile = fi;
       onfile?.(path(files[fi]));
@@ -186,6 +190,7 @@
     const fi = files.findIndex((f) => f.new_path === p || f.old_path === p);
     if (fi < 0) return;
     if (!isOpen(fi)) toggle(fi);
+    target = fi;
     queueMicrotask(() => {
       let y = layout.offs[layout.rows.findIndex((r) => r.t === "file" && r.fi === fi)];
       if (line != null) {
@@ -331,7 +336,7 @@
   .mark:active:not(:disabled) { transform: none; }
   .mark :global(.mi) { color: var(--orange); flex: none; }
   .ms { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--sc); flex: none; }
-  .mt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+  .mt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 500; text-align: left; }
   .mark :global(.mc) { color: var(--text3); flex: none; transition: transform var(--t) var(--ease); }
   .mark:hover :global(.mc) { transform: translateX(2px); color: var(--text2); }
   /* Line a finding points at: soft severity tint + a bar on the gutter edge. */

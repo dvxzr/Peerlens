@@ -205,7 +205,17 @@ const handlers: Record<string, (a: any) => any> = {
   check_update: () => new Promise((r) => setTimeout(() => r({ current: "0.1.0", version: "0.2.0", date: "2026-12-01", notes: "## What's new\n\n### Features\n- Split diff view\n- Faster repo snapshots\n\n### Fixes\n- Pinned header overlapped the next file", can_install: true, release_url: "https://github.com/dvxzr/Peerlens/releases/tag/v0.2.0" }), 400)),
   install_update: () => new Promise(() => {}),
   default_guidelines: () => "You are a principal engineer reviewing a merge request.\n\nWhat to check, in priority order:\n1. Correctness…\n\nRules:\n- Report only problems introduced by this change…",
-  start_review: () => new Promise(() => {}),
+  // Streams the sample review one finding at a time, like a real run.
+  start_review: async (a) => {
+    const send = (e: any) => a.onEvent.onmessage(e);
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    send({ type: "started", chunks: 1, skipped: review.skipped });
+    send({ type: "progress", chunk: 1, total: 1, files: Object.keys(diffs) });
+    for (const f of [...review.findings].reverse()) { await wait(700); send({ type: "finding", finding: f }); }
+    send({ type: "summary", text: review.summaries[0] });
+    await wait(400);
+    send({ type: "done", review: { ...review, threads: {}, created_at: Date.now() / 1000 } });
+  },
   discuss_finding: async (a) => {
     const reply = "Good point. If the list is always capped at 20 items this is a **nit**, not a bug.";
     const activity = a.repoContext ? ["Grep def check  in .", "Read src/auth/utils.py"] : [];

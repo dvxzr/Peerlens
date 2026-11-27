@@ -34,3 +34,13 @@ export function pasteSqueezed(e: ClipboardEvent) {
   el.setRangeText(t, el.selectionStart, el.selectionEnd, "end");
   el.dispatchEvent(new Event("input", { bubbles: true }));
 }
+
+/** Avatar letters for a GitLab user: "Arsen Pidhoretskyi" → "AP". */
+export const initials = (u: { name: string; username: string }) =>
+  (u.name || u.username).trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("");
+/** A stable per-user avatar color. */
+export const avatarColor = (username: string) => `hsl(${[...username].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7)} 55% 62%)`;
+
+const SEVERITIES = ["critical", "major", "minor", "nit"];
+/** The most severe of the given finding severities ("nit" when none is known). */
+export const worstSeverity = (sevs: string[]) => SEVERITIES.find((s) => sevs.includes(s)) ?? "nit";

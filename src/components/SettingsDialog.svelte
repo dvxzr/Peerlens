@@ -10,6 +10,8 @@
   import { onMount } from "svelte";
   import Markdown from "./Markdown.svelte";
   import { updates, checkForUpdates, installUpdate, loadVersion } from "../lib/updates.svelte";
+  import { pref, setPref } from "../lib/prefs";
+  import { kb } from "../lib/platform";
 
   let { settings, agents = [], onsave, onclose, onpreview }: {
     settings: Settings; agents?: AgentInfo[]; onsave: (s: Settings) => void; onclose: () => void; onpreview: (theme: Settings["theme"]) => void;
@@ -21,6 +23,14 @@
   ]);
   // svelte-ignore state_referenced_locally
   let s = $state({ ...settings }); // edit a copy; saved only on Save
+
+  type Page = "general" | "review" | "prompt" | "limits" | "repo" | "connections";
+  const pages: [Page, string, IconName][] = [
+    ["general", "General", "settings"], ["review", "Review", "sparkles"], ["prompt", "Review prompt", "message"],
+    ["limits", "Usage limits", "gauge"], ["repo", "Repo context", "folder"], ["connections", "Connections", "terminal"],
+  ];
+  let page = $state<Page>(pref("settingsPage", "general"));
+  $effect(() => setPref("settingsPage", page));
 
   const themes: [Settings["theme"], string, IconName][] = [["dark", "Dark", "moon"], ["light", "Light", "sun"], ["system", "System", "monitor"]];
   const agentItems: MenuItem<string>[] = [
@@ -54,13 +64,16 @@
     defaultGuide = await api.defaultGuidelines();
     if (!guide.trim()) guide = defaultGuide;
   });
-  let customized = $derived(!!defaultGuide && guide.trim() !== defaultGuide.trim());
+  // Until the default text loads, a non-empty prompt can only be a saved custom one.
+  let customized = $derived(defaultGuide ? guide.trim() !== defaultGuide.trim() : !!guide.trim());
   let customLang = $state("");
   let langItems = $derived<MenuItem<string>[]>(
     [...new Set([...LANGUAGES, s.review_language].filter(Boolean))].map((l) => ({ value: l, label: l, icon: "globe" })),
   );
+  const result = () => ({ ...s, review_guidelines: customized ? guide.trim() : "" });
+  let dirty = $derived(JSON.stringify(result()) !== JSON.stringify(settings));
   function save() {
-    onsave({ ...s, review_guidelines: customized ? guide.trim() : "" });
+    onsave(result());
   }
 
   function setTheme(t: Settings["theme"]) {
@@ -71,172 +84,316 @@
     onpreview(settings.theme);
     onclose();
   }
+  function keys(e: KeyboardEvent) {
+    if (e.key === "Escape") cancel();
+    else if ((e.metaKey || e.ctrlKey) && e.key === "s") { e.preventDefault(); if (dirty) save(); }
+  }
+  const mb = (b: number) => (b / 1_048_576).toFixed(1);
 </script>
 
-<svelte:window onkeydown={(e) => e.key === "Escape" && cancel()} />
+{#snippet num(get: () => number, set: (v: number) => void, unit: string, min: number, max?: number)}
+  <span class="num"><input type="number" {min} {max} value={get()} oninput={(e) => !isNaN(e.currentTarget.valueAsNumber) && set(e.currentTarget.valueAsNumber)} />{#if unit}<em>{unit}</em>{/if}</span>
+{/snippet}
+
+<svelte:window onkeydown={keys} />
 <div class="backdrop" role="presentation" onclick={cancel} transition:fade={{ duration: 140 }}>
   <div class="dlg" role="dialog" aria-label="Settings" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}
     transition:scale={{ start: 0.96, duration: 170, easing: cubicOut }}>
-    <div class="dh"><h2>Settings</h2><button class="ghost icon" onclick={cancel} title="Close"><Icon name="x" size={16} /></button></div>
-    <div class="body">
-      <section>
-        <h3>Appearance</h3>
-        <div class="seg">
-          {#each themes as [v, l, ic] (v)}
-            <button class:on={s.theme === v} onclick={() => setTheme(v)}><Icon name={ic} size={14} />{l}</button>
-          {/each}
-        </div>
-      </section>
+    <nav>
+      <div class="ntitle">Settings</div>
+      {#each pages as [id, label, icon] (id)}
+        <button class:on={page === id} onclick={() => (page = id)}>
+          <Icon name={icon} size={15} />{label}
+          {#if id === "general" && updates.available}<span class="udot" title="Update available"></span>{/if}
+          {#if id === "prompt" && customized}<span class="ntag">custom</span>{/if}
+        </button>
+      {/each}
+      <div class="nsp"></div>
+      <div class="nver mono">Peerlens {updates.version ? `v${updates.version}` : ""}</div>
+    </nav>
 
-      <section>
-        <h3><Icon name="refresh" size={14} />Updates</h3>
-        <div class="f">
-          <span>Peerlens {updates.version ? `v${updates.version}` : ""}
-            {#if updates.checked && !updates.available}<em>· up to date</em>{/if}</span>
-          <button onclick={checkForUpdates} disabled={updates.checking || updates.installing}>
-            <Icon name="refresh" size={13} class={updates.checking ? "spin" : ""} />{updates.checking ? "Checking…" : "Check for updates"}
-          </button>
-        </div>
-        {#if updates.error}<div class="uerr"><Icon name="alert" size={13} /><span>{updates.error}</span></div>{/if}
-        {#if updates.available}
-          {@const u = updates.available}
-          <div class="upd">
-            <div class="uh">
-              <b>v{u.version} is available</b>
-              <span class="dim">{u.date ?? ""}</span>
+    <div class="main">
+      <div class="mh">
+        <h2>{pages.find((p) => p[0] === page)?.[1]}</h2>
+        <button class="ghost icon" onclick={cancel} title="Close"><Icon name="x" size={16} /></button>
+      </div>
+
+      <div class="body">
+        {#if page === "general"}
+          <h4>Appearance</h4>
+          <div class="themes">
+            {#each themes as [v, l, ic] (v)}
+              <button class="theme" class:on={s.theme === v} onclick={() => setTheme(v)}>
+                <span class="prev prev-{v}"><i></i><i></i><i></i></span>
+                <span class="tl"><Icon name={ic} size={13} />{l}</span>
+              </button>
+            {/each}
+          </div>
+
+          <h4>Updates</h4>
+          <div class="card">
+            <div class="row">
+              <div class="rl"><span>Peerlens {updates.version ? `v${updates.version}` : ""}</span>
+                <small>{updates.checked && !updates.available ? "You're up to date." : "Checks GitHub releases for a newer version."}</small></div>
+              <button onclick={checkForUpdates} disabled={updates.checking || updates.installing}>
+                <Icon name="refresh" size={13} class={updates.checking ? "spin" : ""} />{updates.checking ? "Checking…" : "Check now"}
+              </button>
             </div>
-            {#if u.notes.trim()}<div class="notes"><Markdown text={u.notes} /></div>{/if}
-            {#if updates.installing}
-              <div class="ubar"><span style:width={updates.progress < 0 ? "100%" : `${Math.round(updates.progress * 100)}%`} class:indet={updates.progress < 0}></span></div>
-              <div class="dim small">{updates.progress >= 1 ? "Installing… the app will restart" : "Downloading…"}</div>
-            {:else if u.can_install}
-              <button class="primary" onclick={installUpdate}><Icon name="sparkles" size={14} />Update & restart</button>
-            {:else}
-              <button onclick={() => api.openUrl(u.release_url)}><Icon name="external" size={14} />Download v{u.version}</button>
-              <div class="dim small">This build can't update itself (built from source). Download the new version instead.</div>
+            {#if updates.error}<div class="row"><div class="uerr"><Icon name="alert" size={13} /><span>{updates.error}</span></div></div>{/if}
+            {#if updates.available}
+              {@const u = updates.available}
+              <div class="row upd">
+                <div class="uh"><b>v{u.version} is available</b><span class="dim">{u.date ?? ""}</span></div>
+                {#if u.notes.trim()}<div class="notes"><Markdown text={u.notes} /></div>{/if}
+                {#if updates.installing}
+                  <div class="ubar"><span style:width={updates.progress < 0 ? "100%" : `${Math.round(updates.progress * 100)}%`} class:indet={updates.progress < 0}></span></div>
+                  <small>{updates.progress >= 1 ? "Installing… the app will restart" : "Downloading…"}</small>
+                {:else if u.can_install}
+                  <button class="primary" onclick={installUpdate}><Icon name="sparkles" size={14} />Update & restart</button>
+                {:else}
+                  <button onclick={() => api.openUrl(u.release_url)}><Icon name="external" size={14} />Download v{u.version}</button>
+                  <small>This build can't update itself (built from source). Download the new version instead.</small>
+                {/if}
+              </div>
             {/if}
           </div>
-        {/if}
-      </section>
 
-      <section>
-        <h3><Icon name="sparkles" size={14} />Review</h3>
-        <div class="f"><span>Default agent</span><Menu items={agentItems} value={s.default_agent} onselect={(v) => (s.default_agent = v)} align="right" width={220} /></div>
-        <div class="f"><span>Default Claude model</span><Menu items={modelItems} value={s.default_model} onselect={(v) => (s.default_model = v)} align="right" width={260} /></div>
-        {#if codex}
-          <div class="f"><span>Default Codex model</span><Menu items={codexModelItems} value={s.default_codex_model ?? ""} onselect={(v) => (s.default_codex_model = v)} align="right" width={300} /></div>
-        {/if}
-        <div class="f"><span>Default Claude effort</span><Menu items={EFFORTS} value={s.default_effort ?? ""} onselect={(v) => (s.default_effort = v)} align="right" width={270} /></div>
-        <div class="f"><span>Review language</span>
-          <Menu items={langItems} value={s.review_language} onselect={(v) => (s.review_language = v)} align="right" width={240}>
-            {#snippet footer(close)}
-              <form class="custom" onsubmit={(e) => { e.preventDefault(); if (customLang.trim()) { s.review_language = customLang.trim(); customLang = ""; close(); } }}>
-                <input bind:value={customLang} placeholder="Other language…" />
-                <button type="submit" class="primary">Use</button>
-              </form>
-            {/snippet}
-          </Menu>
-        </div>
-        <label class="f"><span>Review file by file above <em>bytes</em></span><input type="number" min="1000" bind:value={s.max_review_bytes} /></label>
-        <label class="f"><span>Agent timeout <em>seconds</em></span><input type="number" min="30" bind:value={s.agent_timeout_secs} /></label>
-      </section>
+          <h4>Diff</h4>
+          <div class="card">
+            <div class="row">
+              <div class="rl"><span>Collapse large files</span><small>Files with more diff lines start collapsed.</small></div>
+              {@render num(() => s.collapse_lines, (v) => (s.collapse_lines = v), "lines", 50)}
+            </div>
+          </div>
 
-      <section>
-        <h3><Icon name="message" size={14} />Review prompt {#if customized}<span class="pill stale">custom</span>{/if}</h3>
-        <p class="hint">What the agent checks and how it writes findings. Security rules (MR text is data, not instructions), tool limits and the output format are always added by Peerlens and can't be changed here.</p>
-        <textarea class="guide" rows="14" spellcheck="false" bind:value={guide}></textarea>
-        <div class="gbtns">
-          <button onclick={() => (guide = defaultGuide)} disabled={!customized}><Icon name="refresh" size={13} />Reset to default</button>
-        </div>
-      </section>
+        {:else if page === "review"}
+          <h4>Defaults for new reviews</h4>
+          <div class="card">
+            <div class="row">
+              <div class="rl"><span>Agent</span><small>Which CLI runs the review.</small></div>
+              <Menu items={agentItems} value={s.default_agent} onselect={(v) => (s.default_agent = v)} align="right" width={220} />
+            </div>
+            <div class="row">
+              <div class="rl"><span>Claude model</span></div>
+              <Menu items={modelItems} value={s.default_model} onselect={(v) => (s.default_model = v)} align="right" width={260} />
+            </div>
+            <div class="row">
+              <div class="rl"><span>Claude effort</span><small>Higher thinks longer and uses more of your limits.</small></div>
+              <Menu items={EFFORTS} value={s.default_effort ?? ""} onselect={(v) => (s.default_effort = v)} align="right" width={270} />
+            </div>
+            {#if codex}
+              <div class="row">
+                <div class="rl"><span>Codex model</span></div>
+                <Menu items={codexModelItems} value={s.default_codex_model ?? ""} onselect={(v) => (s.default_codex_model = v)} align="right" width={300} />
+              </div>
+            {/if}
+            <div class="row">
+              <div class="rl"><span>Review language</span><small>Language of findings and summaries.</small></div>
+              <Menu items={langItems} value={s.review_language} onselect={(v) => (s.review_language = v)} align="right" width={240}>
+                {#snippet footer(close)}
+                  <form class="custom" onsubmit={(e) => { e.preventDefault(); if (customLang.trim()) { s.review_language = customLang.trim(); customLang = ""; close(); } }}>
+                    <input bind:value={customLang} placeholder="Other language…" />
+                    <button type="submit" class="primary">Use</button>
+                  </form>
+                {/snippet}
+              </Menu>
+            </div>
+          </div>
 
-      <section>
-        <h3><Icon name="gauge" size={14} />Usage limits</h3>
-        <p class="hint">Keeps reviews human-paced so your Claude subscription isn't hammered: one review at a time, a pause between parts, and an automatic stop near your plan limits.</p>
-        <label class="f"><span>Pause when Claude usage reaches <em>%</em></span><input type="number" min="10" max="100" bind:value={s.max_usage_pct} /></label>
-        <label class="f"><span>Max reviews per hour</span><input type="number" min="1" bind:value={s.max_reviews_per_hour} /></label>
-        <label class="f"><span>Max agent runs per review</span><input type="number" min="1" bind:value={s.max_chunks} /></label>
-        <label class="f"><span>Pause between parts <em>seconds</em></span><input type="number" min="0" bind:value={s.chunk_delay_secs} /></label>
-      </section>
+          <h4>Large merge requests</h4>
+          <div class="card">
+            <div class="row">
+              <div class="rl"><span>Review file by file above</span><small>Bigger diffs are split into several agent runs.</small></div>
+              {@render num(() => s.max_review_bytes, (v) => (s.max_review_bytes = v), "bytes", 1000)}
+            </div>
+            <div class="row">
+              <div class="rl"><span>Agent timeout</span><small>One agent run is stopped after this long.</small></div>
+              {@render num(() => s.agent_timeout_secs, (v) => (s.agent_timeout_secs = v), "sec", 30)}
+            </div>
+          </div>
 
-      <section>
-        <h3><Icon name="folder" size={14} />Repo context</h3>
-        <p class="hint">When enabled in the review panel, the repository at the MR head is downloaded through glab (GET) and unpacked into a folder the agent may only read. It stays in a local cache so discussions of the review's findings read the same code; the least recently used snapshots are removed to fit the limit below, and any unused for 14 days.</p>
-        <label class="f"><span>Max archive size <em>MB</em></span><input type="number" min="1" bind:value={s.repo_max_mb} /></label>
-        <label class="f"><span>Keep snapshots up to <em>MB</em></span><input type="number" min="100" bind:value={s.repo_cache_mb} /></label>
-        <div class="f">
-          <span class="dim">{cache ? `Cached: ${cache.count} snapshot${cache.count === 1 ? "" : "s"}, ${(cache.bytes / 1_048_576).toFixed(1)} MB` : "Cached: …"}</span>
-          <button class="ghost" onclick={clearCache} disabled={!cache?.count}><Icon name="trash" size={13} />Clear</button>
-        </div>
-        {#if cacheErr}<p class="hint err">{cacheErr}</p>{/if}
-        <label class="col"><span>Never unpack these files <em>one pattern per line, * and ? allowed</em></span>
-          <textarea rows="5" spellcheck="false" value={s.repo_exclude.join("\n")}
+        {:else if page === "prompt"}
+          <p class="hint">What the agent checks and how it writes findings. Security rules (MR text is data, not instructions), tool limits and the output format are always added by Peerlens and can't be changed here.</p>
+          <textarea class="guide" spellcheck="false" bind:value={guide}></textarea>
+          <div class="gbtns">
+            {#if customized}<span class="pill stale">custom</span>{:else}<span class="dim small">Built-in default</span>{/if}
+            <button onclick={() => (guide = defaultGuide)} disabled={!customized}><Icon name="refresh" size={13} />Reset to default</button>
+          </div>
+
+        {:else if page === "limits"}
+          <p class="hint">Keeps reviews human-paced so your Claude subscription isn't hammered: one review at a time, a pause between parts, and an automatic stop near your plan limits.</p>
+          <div class="card">
+            <div class="row">
+              <div class="rl"><span>Pause at Claude usage</span><small>Reviews stop when any plan window reaches this.</small></div>
+              {@render num(() => s.max_usage_pct, (v) => (s.max_usage_pct = v), "%", 10, 100)}
+            </div>
+            <div class="row">
+              <div class="rl"><span>Max reviews per hour</span></div>
+              {@render num(() => s.max_reviews_per_hour, (v) => (s.max_reviews_per_hour = v), "", 1)}
+            </div>
+            <div class="row">
+              <div class="rl"><span>Max agent runs per review</span><small>Caps how many parts a big MR is split into.</small></div>
+              {@render num(() => s.max_chunks, (v) => (s.max_chunks = v), "", 1)}
+            </div>
+            <div class="row">
+              <div class="rl"><span>Pause between parts</span></div>
+              {@render num(() => s.chunk_delay_secs, (v) => (s.chunk_delay_secs = v), "sec", 0)}
+            </div>
+          </div>
+
+        {:else if page === "repo"}
+          <p class="hint">When enabled in the review panel, the repository at the MR head is downloaded through glab (GET) and unpacked into a folder the agent may only read. It stays in a local cache so discussions of the review's findings read the same code; the least recently used snapshots are removed to fit the limit below, and any unused for 14 days.</p>
+          <div class="card">
+            <div class="row">
+              <div class="rl"><span>Max archive size</span><small>Larger repos are not downloaded.</small></div>
+              {@render num(() => s.repo_max_mb, (v) => (s.repo_max_mb = v), "MB", 1)}
+            </div>
+            <div class="row">
+              <div class="rl"><span>Keep snapshots up to</span></div>
+              {@render num(() => s.repo_cache_mb, (v) => (s.repo_cache_mb = v), "MB", 100)}
+            </div>
+            <div class="row">
+              <div class="rl"><span>Cache</span>
+                <small>{cache ? `${cache.count} snapshot${cache.count === 1 ? "" : "s"} · ${mb(cache.bytes)} MB` : "…"}</small></div>
+              <button onclick={clearCache} disabled={!cache?.count}><Icon name="trash" size={13} />Clear</button>
+            </div>
+            {#if cacheErr}<div class="row"><span class="err small">{cacheErr}</span></div>{/if}
+          </div>
+          <h4>Never unpack these files</h4>
+          <textarea rows="6" spellcheck="false" value={s.repo_exclude.join("\n")}
             oninput={(e) => (s.repo_exclude = e.currentTarget.value.split("\n").map((x) => x.trim()).filter(Boolean))}></textarea>
-        </label>
-      </section>
+          <p class="hint below">One pattern per line, <code>*</code> and <code>?</code> allowed.</p>
 
-      <section>
-        <h3><Icon name="mr" size={14} />GitLab</h3>
-        <label class="f"><span>Host</span><input bind:value={s.host} placeholder="glab default host" spellcheck="false" /></label>
-        <label class="f"><span>Group for “All”</span><input bind:value={s.mr_group} placeholder="all your top-level groups" spellcheck="false" /></label>
-        <label class="f"><span>glab path</span><input bind:value={s.glab_path} placeholder="auto-detect" spellcheck="false" /></label>
-      </section>
+        {:else}
+          <h4>Agents</h4>
+          <div class="card">
+            {#each agents as a (a.kind)}
+              <div class="row">
+                <span class="aico" style:color={a.kind === "claude" ? "var(--orange)" : undefined}><Icon name={a.kind} size={16} /></span>
+                <div class="rl"><span>{a.name} <span class="dim mono small">{a.version}</span></span><small class="mono">{a.path}</small></div>
+                {#if a.logged_in === false}<span class="state bad">Not logged in</span>{:else}<span class="state ok">Ready</span>{/if}
+              </div>
+            {:else}
+              <div class="row"><div class="rl"><span>No agent found</span><small>Install Claude Code or Codex, or set a path below.</small></div></div>
+            {/each}
+          </div>
 
-      <section>
-        <h3><Icon name="terminal" size={14} />Paths & display</h3>
-        <label class="f"><span>claude path</span><input bind:value={s.claude_path} placeholder="auto-detect" spellcheck="false" /></label>
-        <label class="f"><span>codex path</span><input bind:value={s.codex_path} placeholder="auto-detect" spellcheck="false" /></label>
-        <label class="f"><span>Collapse files above <em>lines</em></span><input type="number" min="50" bind:value={s.collapse_lines} /></label>
-      </section>
+          <h4>GitLab</h4>
+          <div class="card">
+            <div class="row"><div class="rl"><span>Host</span></div><input bind:value={s.host} placeholder="glab default host" spellcheck="false" /></div>
+            <div class="row"><div class="rl"><span>Group for “All”</span><small>Where the All list looks for open MRs.</small></div><input bind:value={s.mr_group} placeholder="all your top-level groups" spellcheck="false" /></div>
+          </div>
 
-      <div class="secnote"><Icon name="shield" size={14} />GitLab access is GET-only through glab. Agents run without tools in an empty folder, with Git/GitLab credentials removed.</div>
+          <h4>Binary paths</h4>
+          <div class="card">
+            <div class="row"><div class="rl"><span>glab</span></div><input class="mono" bind:value={s.glab_path} placeholder="auto-detect" spellcheck="false" /></div>
+            <div class="row"><div class="rl"><span>claude</span></div><input class="mono" bind:value={s.claude_path} placeholder="auto-detect" spellcheck="false" /></div>
+            <div class="row"><div class="rl"><span>codex</span></div><input class="mono" bind:value={s.codex_path} placeholder="auto-detect" spellcheck="false" /></div>
+          </div>
+        {/if}
+      </div>
+
+      <div class="btns">
+        <span class="secnote" title="Agents run without tools in an empty folder, with Git/GitLab credentials removed."><Icon name="shield" size={13} />GitLab access is read-only (GET via glab)</span>
+        {#if dirty}<span class="dirty" transition:fade={{ duration: 120 }}>Unsaved changes</span>{/if}
+        <button onclick={cancel}>Cancel</button>
+        <button class="primary" onclick={save} disabled={!dirty} title="Save ({kb('S')})">Save</button>
+      </div>
     </div>
-    <div class="btns"><button onclick={cancel}>Cancel</button><button class="primary" onclick={save}>Save</button></div>
   </div>
 </div>
 
 <style>
   .backdrop { position: fixed; inset: 0; background: rgba(8, 8, 14, .5); backdrop-filter: blur(3px); display: grid; place-items: center; z-index: 100; }
-  .dlg { background: var(--bg2); border-radius: 16px; box-shadow: var(--shadow); width: 560px; max-height: 86vh; display: flex; flex-direction: column; }
-  .dh { display: flex; align-items: center; padding: 14px 14px 6px 20px; }
-  h2 { margin: 0; font-size: 16px; flex: 1; }
-  .body { overflow-y: auto; padding: 4px 20px 8px; }
-  section { padding: 12px 0; border-bottom: 1px solid var(--border); }
-  h3 { display: flex; align-items: center; gap: 7px; margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--text2); }
-  h3 :global(svg) { color: var(--text3); }
-  .f { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 4px 0; }
-  .f > span { color: var(--text); }
-  em { font-style: normal; color: var(--text3); font-size: 11.5px; }
-  /* All right-hand controls share one width so the column lines up. */
-  .f input, .f :global(.menu) { width: 220px; flex: none; }
-  .f :global(.menu .trigger) { width: 100%; justify-content: flex-start; }
-  .f :global(.menu .trigger .lbl) { flex: 1; text-align: left; }
-  /* Every value is left-aligned like the popups; no native number spinners. */
-  .f input[type="number"] { font-variant-numeric: tabular-nums; appearance: textfield; -moz-appearance: textfield; }
-  .f input[type="number"]::-webkit-inner-spin-button, .f input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-  .custom { display: flex; gap: 6px; }
-  .custom input { flex: 1; min-width: 0; width: auto; }
-  .guide { width: 100%; font-size: 12px; line-height: 1.5; min-height: 220px; }
-  .upd { margin-top: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg1); display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+  .dlg {
+    background: var(--bg1); border-radius: 16px; box-shadow: var(--shadow); width: min(820px, 94vw); height: min(620px, 88vh);
+    display: grid; grid-template-columns: 200px minmax(0, 1fr); overflow: hidden;
+  }
+
+  nav { background: var(--bg0); border-right: 1px solid var(--border); padding: 16px 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+  .ntitle { font-weight: 700; font-size: 14px; padding: 2px 10px 12px; }
+  nav button { justify-content: flex-start; gap: 9px; border: none; background: none; padding: 7px 10px; border-radius: 8px; color: var(--text2); font-size: 13px; position: relative; }
+  nav button :global(svg) { color: var(--text3); }
+  nav button:hover:not(:disabled) { background: var(--bg2); color: var(--text); }
+  nav button:active:not(:disabled) { transform: none; }
+  nav button.on { background: var(--bg3); color: var(--text); font-weight: 600; }
+  nav button.on :global(svg) { color: var(--accent); }
+  .udot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: auto; }
+  .ntag { margin-left: auto; font-size: 10px; color: var(--orange); }
+  .nsp { flex: 1; }
+  .nver { font-size: 11px; color: var(--text3); padding: 0 10px; }
+
+  .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .mh { display: flex; align-items: center; padding: 14px 14px 4px 24px; }
+  h2 { margin: 0; font-size: 17px; font-weight: 700; flex: 1; letter-spacing: -.01em; }
+  .body { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 24px 20px; display: flex; flex-direction: column; }
+  h4 { margin: 16px 0 7px 2px; font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em; color: var(--text3); }
+  h4:first-child { margin-top: 6px; }
+
+  /* Grouped rows, like system settings. */
+  .card { background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; min-height: 48px; }
+  .row + .row { border-top: 1px solid var(--border); }
+  .rl { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .rl > span { font-size: 13px; }
+  .rl small { font-size: 11.5px; color: var(--text3); line-height: 1.4; overflow: hidden; text-overflow: ellipsis; }
+  .row input:not([type="number"]), .row :global(.menu) { width: 230px; flex: none; }
+  .row :global(.menu .trigger) { width: 100%; justify-content: flex-start; }
+  .row :global(.menu .trigger .lbl) { flex: 1; text-align: left; }
+  .row > button { flex: none; font-size: 12px; }
+
+  .num { display: inline-flex; align-items: center; flex: none; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; transition: border-color var(--t) var(--ease); }
+  .num:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+  .num input { width: 84px; border: none; background: none; text-align: right; font-variant-numeric: tabular-nums; appearance: textfield; -moz-appearance: textfield; }
+  .num input:focus { background: none; }
+  .num input::-webkit-inner-spin-button, .num input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  .num em { font-style: normal; font-size: 11.5px; color: var(--text3); padding-right: 10px; }
+
+  .themes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .theme { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px; border-radius: 12px; background: var(--bg2); border: 1px solid var(--border); }
+  .theme:hover:not(:disabled) { background: var(--bg3); }
+  .theme.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+  .tl { display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 12.5px; color: var(--text2); }
+  .theme.on .tl { color: var(--text); font-weight: 600; }
+  /* Tiny app previews: sidebar, content, accent line. Fixed colors on purpose. */
+  .prev { position: relative; height: 64px; border-radius: 8px; overflow: hidden; display: block; border: 1px solid var(--border); }
+  .prev i { position: absolute; display: block; border-radius: 3px; }
+  .prev i:nth-child(1) { left: 0; top: 0; bottom: 0; width: 30%; border-radius: 0; }
+  .prev i:nth-child(2) { left: 38%; right: 10%; top: 14px; height: 6px; }
+  .prev i:nth-child(3) { left: 38%; right: 30%; top: 28px; height: 6px; }
+  .prev-dark { background: #1b1c24; } .prev-dark i:nth-child(1) { background: #121219; } .prev-dark i:nth-child(2) { background: #8d9bff; } .prev-dark i:nth-child(3) { background: #363745; }
+  .prev-light { background: #ffffff; } .prev-light i:nth-child(1) { background: #f2f2f6; } .prev-light i:nth-child(2) { background: #5563f0; } .prev-light i:nth-child(3) { background: #e3e4ee; }
+  .prev-system { background: linear-gradient(135deg, #ffffff 50%, #1b1c24 50%); }
+  .prev-system i:nth-child(1) { background: linear-gradient(135deg, #f2f2f6 50%, #121219 50%); } .prev-system i:nth-child(2) { background: #6f7dff; } .prev-system i:nth-child(3) { background: #8a8d9c; opacity: .5; }
+
+  .upd { flex-direction: column; align-items: flex-start; gap: 10px; }
   .uh { display: flex; gap: 10px; align-items: baseline; width: 100%; }
   .uh .dim { margin-left: auto; font-size: 12px; }
-  .notes { max-height: 220px; overflow-y: auto; width: 100%; font-size: 12.5px; }
+  .notes { max-height: 200px; overflow-y: auto; width: 100%; font-size: 12.5px; }
   .ubar { width: 100%; height: 5px; background: var(--bg4); border-radius: 3px; overflow: hidden; }
   .ubar span { display: block; height: 100%; background: var(--accent); transition: width 200ms var(--ease); }
   .ubar span.indet { opacity: .6; }
-  .uerr { display: flex; gap: 7px; align-items: flex-start; color: var(--red); font-size: 12px; margin-top: 6px; overflow-wrap: anywhere; }
-  .small { font-size: 11.5px; }
-  .gbtns { display: flex; justify-content: flex-end; margin-top: 8px; }
+  .upd small { font-size: 11.5px; color: var(--text3); }
+  .uerr { display: flex; gap: 7px; align-items: flex-start; color: var(--red); font-size: 12px; overflow-wrap: anywhere; }
+
+  .aico { width: 30px; height: 30px; border-radius: 8px; background: var(--bg3); display: grid; place-items: center; flex: none; }
+  .state { font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px; flex: none; }
+  .state.ok { color: var(--green); background: color-mix(in srgb, var(--green) 13%, transparent); }
+  .state.bad { color: var(--orange); background: color-mix(in srgb, var(--orange) 14%, transparent); }
+
+  .custom { display: flex; gap: 6px; }
+  .custom input { flex: 1; min-width: 0; width: auto; }
+  textarea { width: 100%; font-family: var(--mono); font-size: 12px; line-height: 1.5; resize: vertical; min-height: 90px; background: var(--bg2); }
+  .guide { flex: 1; min-height: 240px; resize: none; }
+  .gbtns { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
   .gbtns button { gap: 6px; font-size: 12px; }
-  h3 .pill { text-transform: none; letter-spacing: 0; }
-  .col { display: flex; flex-direction: column; gap: 6px; padding: 4px 0; }
-  textarea { font-family: var(--mono); font-size: 12px; resize: vertical; min-height: 90px; }
-  .hint { margin: -4px 0 8px; font-size: 12px; color: var(--text3); line-height: 1.5; }
-  .hint.err { color: var(--red); }
-  .seg { display: inline-flex; background: var(--bg1); border: 1px solid var(--border); border-radius: 10px; padding: 3px; gap: 2px; }
-  .seg button { border: none; background: none; padding: 5px 14px; border-radius: 8px; color: var(--text2); }
-  .seg button.on { background: var(--bg4); color: var(--text); font-weight: 600; }
-  .secnote { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; color: var(--text3); padding: 12px 0 4px; line-height: 1.5; }
-  .secnote :global(svg) { color: var(--green); flex: none; margin-top: 2px; }
-  .btns { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--border); }
+  .hint { margin: 4px 0 12px; font-size: 12px; color: var(--text3); line-height: 1.55; }
+  .hint.below { margin: 6px 0 0; }
+  .hint code { font-size: 11px; background: var(--bg3); padding: 0 4px; border-radius: 4px; }
+  .small { font-size: 11.5px; }
+
+  .btns { display: flex; align-items: center; gap: 8px; padding: 12px 20px 14px 24px; border-top: 1px solid var(--border); }
+  .secnote { display: flex; gap: 6px; align-items: center; font-size: 11.5px; color: var(--text3); margin-right: auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .secnote :global(svg) { color: var(--green); flex: none; }
+  .dirty { font-size: 11.5px; color: var(--orange); white-space: nowrap; }
 </style>

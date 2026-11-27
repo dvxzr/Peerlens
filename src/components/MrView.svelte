@@ -13,6 +13,7 @@
   import Icon from "./Icon.svelte";
   import Markdown from "./Markdown.svelte";
   import { pref, setPref } from "../lib/prefs";
+  import { avatarColor, initials, worstSeverity } from "../lib/text";
 
   let { mr, settings, agents, sidebarOpen, onshowsidebar }: {
     mr: MrSummary; settings: Settings; agents: AgentInfo[]; sidebarOpen: boolean; onshowsidebar: () => void;
@@ -92,8 +93,8 @@
     return m;
   });
   let findingsByFile = $derived.by(() => {
-    const m = new Map<string, number>();
-    for (const f of get(mr.project_id, mr.iid)?.findings ?? []) m.set(f.file, (m.get(f.file) ?? 0) + 1);
+    const m = new Map<string, string[]>();
+    for (const f of get(mr.project_id, mr.iid)?.findings ?? []) (m.get(f.file) ?? m.set(f.file, []).get(f.file)!).push(f.severity);
     return m;
   });
 
@@ -137,6 +138,7 @@
 <div class="outer" bind:clientWidth={outerW} style:grid-template-columns={panelOpen ? `minmax(0,1fr) 1px ${effPanelW}px` : "minmax(0,1fr)"}>
   <div class="mr">
     <header data-tauri-drag-region class:nosb={!sidebarOpen}>
+      <div class="crumb mono" data-tauri-drag-region>{mr.references.full.replace(/!\d+$/, "")} · !{mr.iid}</div>
       <div class="t1" data-tauri-drag-region>
         {#if !sidebarOpen}<button class="ghost icon" onclick={onshowsidebar} title="Show sidebar ({kb('B')})"><Icon name="sidebarLeft" size={16} /></button>{/if}
         <h1 title={details?.title ?? mr.title}>{details?.title ?? mr.title}</h1>
@@ -145,10 +147,8 @@
         <button class="ghost icon" class:active={panelOpen} onclick={() => (panelOpen = !panelOpen)} title="{panelOpen ? 'Hide' : 'Show'} AI review panel ({kb('J')})"><Icon name="sidebarRight" size={16} /></button>
       </div>
       <div class="t2">
-        <span class="mono ref">{mr.references.full}</span>
-        <span class="br"><Icon name="branch" size={13} /><span class="mono">{mr.source_branch}</span><Icon name="arrowRight" size={12} /><span class="mono">{mr.target_branch}</span></span>
-        <span class="by"><Icon name="user" size={13} />{mr.author.name || mr.author.username}</span>
-        <span class="by"><Icon name="clock" size={13} />{ago(mr.updated_at)}</span>
+        <span class="by"><span class="av" style:background={avatarColor(mr.author.username)}>{initials(mr.author)}</span>{mr.author.name || mr.author.username}<span class="dim">· {ago(mr.updated_at)}</span></span>
+        <span class="br mono"><Icon name="branch" size={12} />{mr.source_branch}<Icon name="arrowRight" size={11} />{mr.target_branch}</span>
         {#if details}
           <span class="pills" in:fade={{ duration: 150 }}>
             {#if details.draft}<span class="pill draft">Draft</span>{/if}
@@ -159,7 +159,7 @@
         {/if}
       </div>
       {#if details?.description}
-        <details class="descbox"><summary>Description</summary><div class="desc"><Markdown text={details.description} /></div></details>
+        <details class="descbox"><summary>Description<Icon name="chevronDown" size={11} /></summary><div class="desc"><Markdown text={details.description} /></div></details>
       {/if}
       <nav>
         <button class:on={tab === "changes"} onclick={() => (tab = "changes")} title="Changes ({kb('1')})"><Icon name="diff" size={15} />Changes{#if files}<span class="cnt">{files.length}</span>{/if}</button>
@@ -183,13 +183,17 @@
               <div class="changes" style:grid-template-columns={filesOpen ? "220px minmax(0, 1fr)" : "minmax(0, 1fr)"}>
                 {#if filesOpen}
                 <div class="filelist">
-                  {#each files as f (f.old_path + "→" + f.new_path)}
+                  {#each files as f, k (f.old_path + "→" + f.new_path)}
                     {@const p = f.new_path || f.old_path}
-                    <button class="frow" class:cur={currentFile === p} onclick={() => showFile(p)} title={p}>
+                    {@const sevs = findingsByFile.get(p)}
+                    {@const ch = f.additions + f.deletions}
+                    <!-- One heading per run of files in the same folder; the list keeps the diff's order. -->
+                    {#if k === 0 || dir(p) !== dir(files[k - 1].new_path || files[k - 1].old_path)}<div class="fgrp" title={dir(p)}><span>{dir(p) || "/"}</span></div>{/if}
+                    <button class="frow" class:cur={currentFile === p} onclick={() => showFile(p)} title="{p}  +{f.additions} −{f.deletions}">
                       <span class="fdot" class:new={f.new_file} class:del={f.deleted_file}></span>
-                      <span class="fname"><span>{base(p)}</span>{#if dir(p)}<span class="fdir">{dir(p)}</span>{/if}</span>
-                      {#if findingsByFile.get(p)}<span class="fcount" title="Review findings">{findingsByFile.get(p)}</span>{/if}
-                      <span class="fstat mono"><span class="add">+{f.additions}</span><span class="del">−{f.deletions}</span></span>
+                      <span class="fname">{base(p)}</span>
+                      {#if sevs}<span class="sev sev-{worstSeverity(sevs)} fcount" title="Review findings">{sevs.length}</span>{/if}
+                      <span class="fbar"><i class="a" style:width="{ch ? (f.additions / ch) * 100 : 0}%"></i><i class="d" style:width="{ch ? (f.deletions / ch) * 100 : 0}%"></i></span>
                     </button>
                   {/each}
                 </div>
@@ -223,18 +227,25 @@
   .resizer::after { content: ""; position: absolute; inset: 0 -4px; }
   .resizer:hover { background: var(--accent); }
   .mr { display: flex; flex-direction: column; height: 100%; min-width: 0; background: var(--bg1); }
-  header { padding: 12px 18px 0; border-bottom: 1px solid var(--border); flex: none; }
+  header { padding: 10px 18px 0; border-bottom: 1px solid var(--border); flex: none; }
   :global(html.mac) header.nosb { padding-left: 88px; } /* room for the macOS traffic lights */
   .ghost.active { color: var(--accent); }
   .t1 { display: flex; gap: 4px; align-items: center; }
+  .crumb { font-size: 11px; color: var(--text3); margin-bottom: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   h1 { margin: 0; font-size: 17px; font-weight: 650; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -.01em; }
-  .t2 { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 8px 0 4px; color: var(--text2); font-size: 12px; }
-  .ref { color: var(--text3); }
-  .br, .by { display: inline-flex; align-items: center; gap: 5px; }
-  .br :global(svg), .by :global(svg) { color: var(--text3); }
+  .t2 { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0 4px; color: var(--text2); font-size: 12px; }
+  .by { display: inline-flex; align-items: center; gap: 6px; margin-right: 4px; }
+  .av { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; flex: none; font-size: 9px; font-weight: 700; color: #15161d; }
+  .br { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; background: var(--bg3); border-radius: 999px; padding: 1px 9px; line-height: 18px; }
+  .br :global(svg) { color: var(--text3); }
   .pills { display: inline-flex; gap: 5px; flex-wrap: wrap; }
+  /* Status chips: tinted with their own color instead of outlined. */
+  .pills .pill { border-color: transparent; border-radius: 999px; padding: 0 9px; background: color-mix(in srgb, currentColor 13%, transparent); }
   .descbox { margin: 6px 0 2px; }
-  .descbox summary { cursor: pointer; color: var(--text2); font-size: 12px; user-select: none; }
+  .descbox summary { cursor: pointer; color: var(--text2); font-size: 11.5px; user-select: none; display: inline-flex; align-items: center; gap: 4px; padding: 1px 9px; border-radius: 999px; background: var(--bg3); line-height: 18px; }
+  .descbox summary:hover { color: var(--text); }
+  .descbox summary::-webkit-details-marker { display: none; }
+  .descbox[open] summary :global(svg) { transform: rotate(180deg); }
   .desc { max-height: 260px; overflow: auto; padding: 8px 10px; margin-top: 6px; font-size: 12.5px; background: var(--bg2); border-radius: 8px; }
   nav { display: flex; gap: 4px; margin-top: 8px; align-items: center; }
   nav .ghost.icon { margin-left: 4px; }
@@ -242,7 +253,7 @@
   nav button:hover:not(:disabled) { background: none; color: var(--text); }
   nav button:active:not(:disabled) { transform: none; }
   nav button.on { border-bottom-color: var(--accent); color: var(--text); font-weight: 600; }
-  .cnt { font-size: 11px; background: var(--bg3); color: var(--text2); border-radius: 6px; padding: 0 6px; line-height: 17px; font-weight: 500; }
+  .cnt { font-size: 10.5px; background: var(--bg3); color: var(--text2); border-radius: 999px; padding: 0 6px; line-height: 17px; font-weight: 500; }
   .totals { margin-left: auto; font-size: 12px; display: flex; gap: 6px; }
   .add { color: var(--green); } .del { color: var(--red); }
   .error { display: flex; gap: 8px; margin: 10px 18px 0; padding: 8px 10px; border-radius: 9px; color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); font-size: 12px; }
@@ -252,15 +263,19 @@
   .changes { display: grid; grid-template-rows: minmax(0, 1fr); height: 100%; min-height: 0; }
   .changes > * { min-height: 0; }
   .filelist { overflow-y: auto; border-right: 1px solid var(--border); padding: 8px 6px; background: var(--bg1); }
+  .fgrp { display: flex; font-size: 11px; color: var(--text3); padding: 10px 8px 3px; }
+  .fgrp:first-child { padding-top: 2px; }
+  .fgrp span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
   .frow { display: flex; gap: 8px; width: 100%; border: none; background: none; text-align: left; padding: 5px 8px; border-radius: 7px; justify-content: flex-start; }
   .frow:hover:not(:disabled) { background: var(--bg2); }
   .frow.cur { background: var(--bg3); }
   .fdot { width: 6px; height: 6px; border-radius: 50%; background: var(--yellow); flex: none; }
   .fdot.new { background: var(--green); } .fdot.del { background: var(--red); }
-  .fname { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 12.5px; line-height: 1.3; }
-  .fname > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .fdir { font-size: 10.5px; color: var(--text3); direction: rtl; text-align: left; }
-  .fcount { font-size: 10px; font-weight: 700; color: var(--on-accent); background: var(--accent); border-radius: 8px; padding: 0 5px; line-height: 15px; }
-  .fstat { display: flex; gap: 4px; font-size: 11px; }
+  .fname { flex: 1; min-width: 0; font-size: 12.5px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text2); }
+  .frow.cur .fname { color: var(--text); }
+  .fcount { padding: 0 5px; line-height: 15px; }
+  .fbar { display: flex; flex: none; width: 26px; height: 4px; border-radius: 2px; overflow: hidden; background: var(--bg4); }
+  .fbar i { display: block; height: 100%; }
+  .fbar .a { background: var(--green); } .fbar .d { background: var(--red); }
   .diff { min-width: 0; min-height: 0; }
 </style>

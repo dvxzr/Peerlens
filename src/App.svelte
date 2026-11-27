@@ -97,7 +97,7 @@
   {#if sidebarOpen}
     <Sidebar {mrs} {loading} {error} {refreshedAt} {selected} {showAll} onselect={(m) => (selected = m)} onrefresh={refresh}
       onscope={setScope}
-      onsettings={() => (showSettings = true)} onhide={toggleSidebar} />
+      onsettings={() => (showSettings = true)} />
     <div class="resizer" role="separator" aria-orientation="vertical" onpointerdown={drag}></div>
   {/if}
   <main>

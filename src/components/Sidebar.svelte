@@ -10,9 +10,9 @@
   import { ensureLoaded, get } from "../lib/review.svelte";
   import { avatarColor, initials, worstSeverity } from "../lib/text";
 
-  let { mrs, loading, error, refreshedAt, selected, showAll, onselect, onrefresh, onscope, onsettings, onhide }: {
+  let { mrs, loading, error, refreshedAt, selected, showAll, onselect, onrefresh, onscope, onsettings }: {
     mrs: MrSummary[]; loading: boolean; error: string; refreshedAt: number | null; selected: MrSummary | null; showAll: boolean;
-    onselect: (m: MrSummary) => void; onrefresh: () => void; onscope: (all: boolean) => void; onsettings: () => void; onhide: () => void;
+    onselect: (m: MrSummary) => void; onrefresh: () => void; onscope: (all: boolean) => void; onsettings: () => void;
   } = $props();
 
   // Re-render relative times ("updated 3 minutes ago") while the list sits idle.
@@ -78,7 +78,6 @@
       title={updates.available ? `Update available: v${updates.available.version} (Settings → Updates)` : `Settings (${kb(",")})`}>
       <Icon name="settings" size={16} />{#if updates.available}<span class="udot"></span>{/if}
     </button>
-    <button class="ghost icon" onclick={onhide} title="Hide sidebar ({kb('B')})"><Icon name="sidebarLeft" size={16} /></button>
   </div>
   <div class="searchbox">
     <Icon name="search" size={14} class="sicon" />

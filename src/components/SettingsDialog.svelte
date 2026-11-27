@@ -343,13 +343,12 @@
   .row > button { flex: none; font-size: 12px; }
 
   /* Same width everywhere; the unit column is fixed so the numbers line up. */
-  .num { display: inline-flex; align-items: center; flex: none; width: 150px; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; transition: border-color var(--t) var(--ease); }
-  .num:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
-  .num input { flex: 1; min-width: 0; width: auto; border: none; background: none; text-align: right; font-variant-numeric: tabular-nums; appearance: textfield; -moz-appearance: textfield; }
-  .num input:focus { background: none; }
-  .num input:focus-visible { outline: none; } /* the field's own ring is shown instead */
+  /* The whole box is the input; the unit sits outside in a fixed column so the boxes line up. */
+  .num { display: inline-flex; align-items: center; gap: 8px; flex: none; }
+  .num input { width: 120px; text-align: right; font-variant-numeric: tabular-nums; appearance: textfield; -moz-appearance: textfield; }
   .num input::-webkit-inner-spin-button, .num input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-  .num em { flex: none; width: 44px; font-style: normal; font-size: 11.5px; color: var(--text3); padding-left: 2px; }
+  .num em { width: 34px; font-style: normal; font-size: 11.5px; color: var(--text3); }
+  .row input:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-bg); } /* one ring: border + glow */
 
   .themes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
   .theme { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px; border-radius: 12px; background: var(--bg2); border: 1px solid var(--border); }

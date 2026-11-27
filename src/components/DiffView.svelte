@@ -199,6 +199,16 @@
     if (r.t === "line") return r.l.n;
     return r.t === "pair" && r.b != null ? files[r.fi].lines[r.b].n : null;
   }
+  const SEV: Record<string, string> = { critical: "var(--red)", major: "var(--orange)", minor: "var(--yellow)" };
+  const sevColor = (sev: string) => SEV[sev] ?? "var(--text3)";
+  /** Color of the most severe finding anchored to a new-side line, or null. */
+  function flag(fi: number, l: Line | null) {
+    if (!l || l.n == null || l.k === "-") return null;
+    const ms = markers.get(`${path(files[fi])}:${l.n}`);
+    if (!ms?.length) return null;
+    const rank = (sev: string) => ({ critical: 0, major: 1, minor: 2 })[sev] ?? 3;
+    return sevColor(ms.reduce((a, b) => (rank(b.severity) < rank(a.severity) ? b : a)).severity);
+  }
   const kind = (k: Line["k"]) => (k === "+" ? "a" : k === "-" ? "d" : k === "@" ? "h" : "c");
   const dir = (p: string) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/") + 1) : "");
   const base = (p: string) => p.slice(p.lastIndexOf("/") + 1);
@@ -228,7 +238,8 @@
 
 {#snippet half(fi: number, li: number | null, side: "o" | "n")}
   {@const l = li == null ? null : files[fi].lines[li]}
-  <div class="half k{l ? (l.k === ' ' ? 'c' : kind(l.k)) : 'e'}">
+  {@const fc = side === "n" ? flag(fi, l) : null}
+  <div class="half k{l ? (l.k === ' ' ? 'c' : kind(l.k)) : 'e'}" class:flag={fc} style:--sc={fc}>
     <span class="gut"><span class="num">{l?.[side] ?? ""}</span><span class="sign">{l && l.k !== " " ? l.k : ""}</span></span>
     <span class="clip"><span class="shift">{#if l && li != null}{@render code(fi, li, l)}{/if}</span></span>
   </div>
@@ -247,15 +258,18 @@
       {:else if r.t === "note"}
         <div class="note"><Icon name="alert" size={14} />{r.text}</div>
       {:else if r.t === "mark"}
-        <button class="mark" onclick={() => onmarker?.(r.m.id)} title="Show this finding">
-          <span class="sev sev-{r.m.severity}">{r.m.severity}</span><span class="mt">{r.m.title}</span>
+        <button class="mark" style:--sc={sevColor(r.m.severity)} onclick={() => onmarker?.(r.m.id)} title="Show this finding">
+          <Icon name="sparkles" size={13} class="mi" />
+          <span class="ms">{r.m.severity}</span><span class="mt">{r.m.title}</span>
+          <Icon name="chevronRight" size={13} class="mc" />
         </button>
       {:else if r.t === "gap"}
         <div class="gap"></div>
       {:else if r.t === "pair"}
         <div class="ln pair">{@render half(r.fi, r.a, "o")}{@render half(r.fi, r.b, "n")}</div>
       {:else}
-        <div class="ln k{kind(r.l.k)}">
+        {@const fc = flag(r.fi, r.l)}
+        <div class="ln k{kind(r.l.k)}" class:flag={fc} style:--sc={fc}>
           <span class="gut"><span class="num">{r.l.o ?? ""}</span><span class="num">{r.l.n ?? ""}</span><span class="sign">{r.l.k === "@" || r.l.k === " " ? "" : r.l.k}</span></span>
           {@render code(r.fi, r.li, r.l)}
         </div>
@@ -305,14 +319,24 @@
   .kh { background: color-mix(in srgb, var(--accent) 7%, var(--bg1)); color: var(--text3); }
   .kh .gut { background: color-mix(in srgb, var(--accent) 10%, var(--bg1)); }
   .kh .code { font-style: italic; }
+  /* Finding strip under its line (design B): one thin row tinted by severity; click opens it in the panel. */
   .mark {
     display: flex; justify-content: flex-start; gap: 8px; height: 24px; border-radius: 0; border: none;
-    border-left: 3px solid var(--accent); padding: 0 12px 0 119px; background: color-mix(in srgb, var(--accent) 14%, var(--bg1));
-    font: 12px -apple-system, system-ui, sans-serif; white-space: nowrap;
+    border-top: 1px solid color-mix(in srgb, var(--sc) 16%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--sc) 16%, transparent);
+    padding: 0 14px 0 132px; background: color-mix(in srgb, var(--sc) 6%, var(--bg1));
+    font: 12px -apple-system, system-ui, sans-serif; white-space: nowrap; color: var(--text);
   }
-  .mark:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 22%, var(--bg1)); }
+  .mark:hover:not(:disabled) { background: color-mix(in srgb, var(--sc) 11%, var(--bg1)); }
   .mark:active:not(:disabled) { transform: none; }
-  .mt { overflow: hidden; text-overflow: ellipsis; }
+  .mark :global(.mi) { color: var(--orange); flex: none; }
+  .ms { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--sc); flex: none; }
+  .mt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+  .mark :global(.mc) { color: var(--text3); flex: none; transition: transform var(--t) var(--ease); }
+  .mark:hover :global(.mc) { transform: translateX(2px); color: var(--text2); }
+  /* Line a finding points at: soft severity tint + a bar on the gutter edge. */
+  .flag { background: color-mix(in srgb, var(--sc) 9%, var(--bg1)); }
+  .flag .gut { box-shadow: inset 3px 0 0 var(--sc); }
   .chm { position: absolute; width: 100ch; height: 0; visibility: hidden; }
   /* Split view: two fixed halves; code is clipped and shifted by --sx (see onWheel). */
   .split .ln { width: var(--vw); overflow: hidden; }
@@ -324,5 +348,5 @@
   .shift { display: inline-block; transform: translateX(var(--sx)); }
   .ke { background: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--text3) 8%, transparent) 6px 7px); }
   .ke .gut { background: var(--bg1); }
-  .split .mark { padding-left: calc(var(--vw) / 2 + 67px); }
+  .split .mark { padding-left: calc(var(--vw) / 2 + 80px); }
 </style>

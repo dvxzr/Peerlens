@@ -347,6 +347,7 @@
   .num:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
   .num input { flex: 1; min-width: 0; width: auto; border: none; background: none; text-align: right; font-variant-numeric: tabular-nums; appearance: textfield; -moz-appearance: textfield; }
   .num input:focus { background: none; }
+  .num input:focus-visible { outline: none; } /* the field's own ring is shown instead */
   .num input::-webkit-inner-spin-button, .num input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
   .num em { flex: none; width: 44px; font-style: normal; font-size: 11.5px; color: var(--text3); padding-left: 2px; }
 

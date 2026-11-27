@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Peerlens",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "identifier": "dev.peerlens.app",
   "build": {
     "beforeDevCommand": "pnpm dev",

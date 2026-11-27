@@ -133,13 +133,6 @@
   }
 
   onMount(loadUsage);
-  const winLabel = (n: string) => ({ five_hour: "5-hour", seven_day: "Weekly", seven_day_opus: "Weekly Opus" })[n] ?? n.replaceAll("_", " ");
-  const resetIn = (ts: number) => {
-    const m = Math.max(0, Math.round((ts * 1000 - Date.now()) / 60000));
-    return m >= 60 * 24 ? `${Math.round(m / 1440)}d` : m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
-  };
-  // The most-used limit that hasn't reset yet; shown as one line under the Review button.
-  let worst = $derived(usage.value?.windows.filter((w) => w.resets_at * 1000 > Date.now()).sort((a, b) => b.utilization - a.utilization)[0]);
   let overLimit = $derived(agent === "claude" && !!usage.value?.windows.some((w) => w.utilization * 100 >= settings.max_usage_pct && w.resets_at * 1000 > Date.now()));
 
   // Finding discussion threads: one open at a time, sent with the agent/model chosen above.
@@ -243,7 +236,7 @@
 </script>
 
 {#snippet card(f: Finding, i: number)}
-  <div class="card" id="finding-{i}" in:fly={{ y: 8, duration: 220, easing: cubicOut }}>
+  <div class="card" id="finding-{i}" in:fly={{ y: 10, duration: 360, easing: cubicOut }}>
     <div class="head">
       <span class="sev sev-{f.severity}">{f.severity}</span>
       <span class="cat">{f.category}</span>
@@ -286,7 +279,7 @@
         {#if thread.length}<span class="tcount" title="{thread.length} messages"><Icon name="message" size={11} />{thread.length}</span>{/if}
       </div>
       {#if openThread === i}
-        <div class="thread" transition:slide={{ duration: 160 }}>
+        <div class="thread" transition:slide={{ duration: 260, easing: cubicOut }}>
           <div class="ctx">
             <span>Context:</span>
             <span class="pill"><Icon name="target" size={11} />this finding</span>
@@ -418,14 +411,6 @@
             </button>
           {/if}
         </div>
-        {#if agent === "claude" && worst}
-          {@const pct = Math.round(worst.utilization * 100)}
-          <div class="uline" title={usage.value?.windows.map((w) => `${winLabel(w.name)}: ${Math.round(w.utilization * 100)}% · resets in ${resetIn(w.resets_at)}`).join("\n")}>
-            <Icon name="gauge" size={12} /><span class="dim">{winLabel(worst.name)}</span>
-            <span class="bar"><span class="fill" class:hot={pct >= settings.max_usage_pct} class:warm={pct >= settings.max_usage_pct * 0.7} style:width="{Math.min(100, pct)}%"></span></span>
-            <span class="mono">{pct}%</span><span class="dim">· {resetIn(worst.resets_at)}</span>
-          </div>
-        {/if}
       </div>
       {#if repoContext && agent === "codex" && !r?.running}
         <div class="note-warn"><Icon name="alert" size={13} /><span>Codex reads repo code with shell commands in a read-only, offline sandbox. Unlike Claude it can't be limited to the snapshot folder; the prompt forbids reading elsewhere.</span></div>
@@ -436,7 +421,7 @@
       {#if overLimit && !r?.running}
         <div class="note-warn"><Icon name="gauge" size={13} />Paused: Claude usage is over {settings.max_usage_pct}%. Raise the threshold in Settings or wait for the reset.</div>
       {/if}
-      {#if r?.running}<div class="indet" transition:fade={{ duration: 150 }}><span></span></div>{/if}
+      {#if r?.running}<div class="indet" transition:fade={{ duration: 220 }}><span></span></div>{/if}
     {/if}
   </div>
   <div class="results">
@@ -464,7 +449,7 @@
       {#if r.summaries.length}
         <div class="verdict" style:--vc={verdict.color}>
           <div class="vh"><Icon name={verdict.icon} size={14} />{verdict.label}</div>
-          {#each r.summaries as s, i (i)}<div class="summary" in:fade={{ duration: 200 }}><Rich text={s} /></div>{/each}
+          {#each r.summaries as s, i (i)}<div class="summary" in:fade={{ duration: 300 }}><Rich text={s} /></div>{/each}
         </div>
       {/if}
       {#if counts.length}
@@ -475,7 +460,7 @@
           {/each}
         </div>
       {/if}
-      {#each r.errors as e, i (i)}<div class="warn" transition:slide={{ duration: 160 }}><Icon name="alert" size={14} /><span>{e}</span></div>{/each}
+      {#each r.errors as e, i (i)}<div class="warn" transition:slide={{ duration: 260, easing: cubicOut }}><Icon name="alert" size={14} /><span>{e}</span></div>{/each}
       {#each grouped as [file, items] (file)}
         <div class="group"><Icon name="file" size={13} /><span class="mono">{file}</span></div>
         {#each items as { f, i } (i)}{@render card(f, i)}{/each}
@@ -544,9 +529,6 @@
   .nquote:active:not(:disabled) { transform: none; }
   .nclear { width: 24px; height: 24px; color: var(--text3); }
   .act { display: flex; gap: 6px; align-items: center; }
-  .uline { display: flex; align-items: center; gap: 6px; padding: 0 2px; font-size: 11px; cursor: default; }
-  .uline :global(svg) { color: var(--text3); flex: none; }
-  .uline .bar { flex: 1; }
   .custom { display: flex; gap: 6px; }
   .custom input { flex: 1; min-width: 0; height: 30px; }
   .go { flex: 1; height: 34px; font-size: 13.5px; border-radius: 9px; background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, white), var(--accent2)); box-shadow: 0 1px 0 rgba(255, 255, 255, .12) inset, 0 4px 14px -6px var(--accent); }
@@ -566,9 +548,6 @@
   .activity summary :global(svg) { color: var(--text3); }
   .acts { max-height: 180px; overflow-y: auto; margin-top: 6px; padding: 6px 8px; background: var(--bg2); border-radius: 8px; border: 1px solid var(--border); }
   .act { font-size: 11px; color: var(--text2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.6; }
-  .bar { height: 5px; background: var(--bg4); border-radius: 3px; overflow: hidden; }
-  .fill { display: block; height: 100%; background: var(--green); border-radius: 3px; transition: width 400ms var(--ease); }
-  .fill.warm { background: var(--yellow); } .fill.hot { background: var(--red); }
   .results { overflow-y: auto; flex: 1; padding: 12px 14px 24px; }
   /* One row: the info text truncates so the Delete button never jumps when its label grows. */
   .meta { display: flex; gap: 6px; align-items: center; font-size: 11.5px; margin-bottom: 8px; }
@@ -604,6 +583,8 @@
   .sugg .text { color: var(--text); }
   .sl { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: .04em; }
   .code { background: var(--bg1); padding: 8px 10px; border-radius: 8px; overflow-x: auto; margin: 6px 0; white-space: pre; border: 1px solid var(--border); line-height: 1.5; }
+  /* Snippets in cards wrap instead of scrolling sideways. */
+  .card .code { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: visible; }
   .code.bad { border-left: 3px solid var(--red); }
   .code.good { border-left: 3px solid var(--green); margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; border-top: none; }
   .codewrap { margin-top: 6px; }

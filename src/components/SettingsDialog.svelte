@@ -92,13 +92,13 @@
 </script>
 
 {#snippet num(get: () => number, set: (v: number) => void, unit: string, min: number, max?: number)}
-  <span class="num"><input type="number" {min} {max} value={get()} oninput={(e) => !isNaN(e.currentTarget.valueAsNumber) && set(e.currentTarget.valueAsNumber)} />{#if unit}<em>{unit}</em>{/if}</span>
+  <span class="num"><input type="number" {min} {max} value={get()} oninput={(e) => !isNaN(e.currentTarget.valueAsNumber) && set(e.currentTarget.valueAsNumber)} /><em>{unit}</em></span>
 {/snippet}
 
 <svelte:window onkeydown={keys} />
-<div class="backdrop" role="presentation" onclick={cancel} transition:fade={{ duration: 140 }}>
+<div class="backdrop" role="presentation" onclick={cancel} transition:fade={{ duration: 200 }}>
   <div class="dlg" role="dialog" aria-label="Settings" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}
-    transition:scale={{ start: 0.96, duration: 170, easing: cubicOut }}>
+    transition:scale={{ start: 0.97, duration: 260, easing: cubicOut }}>
     <nav>
       <div class="ntitle">Settings</div>
       {#each pages as [id, label, icon] (id)}
@@ -295,7 +295,7 @@
 
       <div class="btns">
         <span class="secnote" title="Agents run without tools in an empty folder, with Git/GitLab credentials removed."><Icon name="shield" size={13} />GitLab access is read-only (GET via glab)</span>
-        {#if dirty}<span class="dirty" transition:fade={{ duration: 120 }}>Unsaved changes</span>{/if}
+        {#if dirty}<span class="dirty" transition:fade={{ duration: 200 }}>Unsaved changes</span>{/if}
         <button onclick={cancel}>Cancel</button>
         <button class="primary" onclick={save} disabled={!dirty} title="Save ({kb('S')})">Save</button>
       </div>
@@ -342,12 +342,13 @@
   .row :global(.menu .trigger .lbl) { flex: 1; text-align: left; }
   .row > button { flex: none; font-size: 12px; }
 
-  .num { display: inline-flex; align-items: center; flex: none; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; transition: border-color var(--t) var(--ease); }
+  /* Same width everywhere; the unit column is fixed so the numbers line up. */
+  .num { display: inline-flex; align-items: center; flex: none; width: 150px; background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; transition: border-color var(--t) var(--ease); }
   .num:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
-  .num input { width: 84px; border: none; background: none; text-align: right; font-variant-numeric: tabular-nums; appearance: textfield; -moz-appearance: textfield; }
+  .num input { flex: 1; min-width: 0; width: auto; border: none; background: none; text-align: right; font-variant-numeric: tabular-nums; appearance: textfield; -moz-appearance: textfield; }
   .num input:focus { background: none; }
   .num input::-webkit-inner-spin-button, .num input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
-  .num em { font-style: normal; font-size: 11.5px; color: var(--text3); padding-right: 10px; }
+  .num em { flex: none; width: 44px; font-style: normal; font-size: 11.5px; color: var(--text3); padding-left: 2px; }
 
   .themes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
   .theme { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px; border-radius: 12px; background: var(--bg2); border: 1px solid var(--border); }

@@ -8,12 +8,13 @@
   import { onMount, tick } from "svelte";
   import { pref, setPref } from "../lib/prefs";
   import { fly, fade, slide } from "svelte/transition";
+  import { flip } from "svelte/animate";
   import { cubicOut } from "svelte/easing";
   import Menu from "./Menu.svelte";
   import Icon from "./Icon.svelte";
   import Rich from "./Rich.svelte";
   import { CLAUDE_MODELS, EFFORTS, LANGUAGES, codexEfforts } from "../lib/options";
-  import { pasteSqueezed } from "../lib/text";
+  import { dedent, pasteSqueezed } from "../lib/text";
 
   let { projectId, iid, headSha, agents, settings, currentFile, onjump }: {
     projectId: number; iid: number; headSha: string; agents: AgentInfo[]; settings: Settings;
@@ -236,7 +237,7 @@
 </script>
 
 {#snippet card(f: Finding, i: number)}
-  <div class="card" id="finding-{i}" in:fly={{ y: 10, duration: 360, easing: cubicOut }}>
+  <div class="card" id="finding-{i}" in:fly|global={{ y: 12, duration: r?.running ? 420 : 0, easing: cubicOut }}>
     <div class="head">
       <span class="sev sev-{f.severity}">{f.severity}</span>
       <span class="cat">{f.category}</span>
@@ -252,7 +253,7 @@
     </div>
     <div class="ftitle"><Rich text={f.title} /></div>
     <div class="text"><Rich text={f.explanation} /></div>
-    {#if f.snippet}<pre class="code bad">{f.snippet}</pre>{/if}
+    {#if f.snippet}<pre class="code bad">{dedent(f.snippet)}</pre>{/if}
     {#if f.suggestion && (f.suggestion.description || f.suggestion.code)}
       <div class="sugg">
         <div class="sl"><Icon name="sparkles" size={13} />Suggestion</div>
@@ -265,7 +266,7 @@
                 <Icon name={copied === `code-${i}` ? "check" : "copy"} size={13} />{copied === `code-${i}` ? "Copied" : "Copy"}
               </button>
             </div>
-            <pre class="code good">{f.suggestion.code}</pre>
+            <pre class="code good">{dedent(f.suggestion.code)}</pre>
           </div>
         {/if}
       </div>
@@ -462,12 +463,14 @@
       {/if}
       {#each r.errors as e, i (i)}<div class="warn" transition:slide={{ duration: 260, easing: cubicOut }}><Icon name="alert" size={14} /><span>{e}</span></div>{/each}
       {#each grouped as [file, items] (file)}
+        <div class="fgroup" animate:flip={{ duration: 320, easing: cubicOut }} in:fade|global={{ duration: r?.running ? 300 : 0 }}>
         <div class="group"><Icon name="file" size={13} /><span class="mono">{file}</span></div>
-        {#each items as { f, i } (i)}{@render card(f, i)}{/each}
+        {#each items as { f, i } (i)}<div animate:flip={{ duration: 320, easing: cubicOut }}>{@render card(f, i)}</div>{/each}
+        </div>
       {/each}
       {#if unanchored.length}
         <div class="group"><Icon name="target" size={13} />Not tied to diff lines</div>
-        {#each unanchored as { f, i } (i)}{@render card(f, i)}{/each}
+        {#each unanchored as { f, i } (i)}<div animate:flip={{ duration: 320, easing: cubicOut }}>{@render card(f, i)}</div>{/each}
       {/if}
       {#if r.raw}
         <div class="group"><Icon name="terminal" size={13} />Raw agent output</div>
@@ -531,8 +534,12 @@
   .act { display: flex; gap: 6px; align-items: center; }
   .custom { display: flex; gap: 6px; }
   .custom input { flex: 1; min-width: 0; height: 30px; }
-  .go { flex: 1; height: 34px; font-size: 13.5px; border-radius: 9px; background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, white), var(--accent2)); box-shadow: 0 1px 0 rgba(255, 255, 255, .12) inset, 0 4px 14px -6px var(--accent); }
-  .go:hover:not(:disabled) { background: var(--accent2); }
+  .go {
+    flex: 1; height: 34px; font-size: 13.5px; border-radius: 9px;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, white), var(--accent2));
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .12) inset; transition: filter var(--t) var(--ease), transform 140ms var(--ease), opacity var(--t);
+  }
+  .go:hover:not(:disabled) { background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, white), var(--accent2)); filter: brightness(1.08); }
   kbd { font: 500 10.5px var(--mono); opacity: .65; margin-left: 4px; }
   .note-warn { display: flex; gap: 7px; align-items: flex-start; font-size: 11.5px; color: var(--orange); line-height: 1.4; }
   .note-warn :global(svg) { flex: none; margin-top: 1px; }

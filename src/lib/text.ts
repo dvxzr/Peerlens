@@ -44,3 +44,10 @@ export const avatarColor = (username: string) => `hsl(${[...username].reduce((h,
 const SEVERITIES = ["critical", "major", "minor", "nit"];
 /** The most severe of the given finding severities ("nit" when none is known). */
 export const worstSeverity = (sevs: string[]) => SEVERITIES.find((s) => sevs.includes(s)) ?? "nit";
+
+/** Code without the indentation all its lines share, for display (a snippet cut from a nested block). */
+export function dedent(code: string): string {
+  const lines = code.replace(/\s+$/, "").split("\n");
+  const pad = Math.min(...lines.filter((l) => l.trim()).map((l) => l.length - l.trimStart().length));
+  return Number.isFinite(pad) && pad > 0 ? lines.map((l) => l.slice(pad)).join("\n") : lines.join("\n");
+}

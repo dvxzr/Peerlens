@@ -1,90 +1,107 @@
+<div align="center">
+
+<img src="src-tauri/icons/128x128@2x.png" width="96" alt="Peerlens icon">
+
 # Peerlens
 
-A small, fast desktop app for reviewing your GitLab merge requests with an AI agent that runs **locally** and
-**cannot change anything**. It uses [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or
-[Codex](https://github.com/openai/codex) through their CLIs and your existing subscription. It talks to GitLab only
-through [`glab`](https://gitlab.com/gitlab-org/cli), and only with read requests.
+**Review GitLab merge requests with an AI agent that runs on your machine and can't change anything.**
 
-![Peerlens: MR list, diff with inline findings, AI review panel with the summary and a finding discussion](docs/screenshot-dark.png)
+[![Release](https://img.shields.io/github/v/release/dvxzr/Peerlens?sort=semver)](https://github.com/dvxzr/Peerlens/releases/latest)
+[![CI](https://github.com/dvxzr/Peerlens/actions/workflows/ci.yml/badge.svg)](https://github.com/dvxzr/Peerlens/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)
+
+[Install](#install) · [Features](#features) · [How it works](#how-a-review-works) · [Security](SECURITY.md) · [Development](#development)
+
+</div>
+
+![Peerlens: merge requests, a diff with inline findings and the AI review panel with a finding discussion](docs/screenshot-dark.png)
+
+Peerlens is a small, fast desktop app for the merge requests you review. It runs
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) or [Codex](https://github.com/openai/codex) through
+their CLIs and your existing subscription, and talks to GitLab only through [`glab`](https://gitlab.com/gitlab-org/cli)
+with read requests. Nothing is committed, applied or posted: findings stay in the app until you act on them.
 
 ## Features
 
-- **Your MRs in one place.** *Mine* shows open MRs where you are assignee or reviewer; *All* shows recently updated
-  open MRs in your groups (or one group set in Settings). Grouped by project, with filter, draft and role badges.
-  Lists load on start and on Refresh, and switching between Mine and All shows the last loaded list instantly.
-  Nothing polls in the background.
-- **Fast diff viewer.** Virtualized unified or split (side-by-side) diff with syntax highlighting (languages load on
-  demand), sticky file headers, pinned line numbers, collapsed large or generated files.
-- **Commits and discussions.** Per-commit diffs, threads with resolved filter, jump from a comment to its line,
-  GitLab Markdown and emoji rendered safely.
-- **AI review.** Pick the agent, model, reasoning effort, scope and language from one compact line. The verdict
-  summary sits on top; findings stream in with severity, explanation, the problematic snippet and a suggested fix
-  with a Copy button. They are grouped by file, shown inline in the diff and can be filtered by severity. Large MRs
-  are reviewed file by file; lock, binary and generated files are skipped and listed.
-- **Hand a finding to your coding agent.** The copy icon on each finding copies it as Markdown: file and lines,
-  explanation, code, the suggested fix and the whole discussion, with a reminder to verify it before changing code.
-- **Reviewer notes.** Tell the agent what the change is about and what to focus on or skip, or paste the task with
-  its acceptance criteria: the agent checks the change against them. Pasted text (e.g. from Jira) is cleaned of
-  extra indentation and blank lines so it doesn't eat the limit. Notes are kept per MR and sent as a separate
-  trusted block; the MR description is already included.
-- **Discuss a finding.** Open a thread under any finding and argue with the agent about it. It sees the finding, the
-  diff of its file, the thread and (with Repo on) the repository at the reviewed commit. It answers with its decision
-  first (still valid, downgraded, withdrawn) and checks fixes you propose. Threads are saved with the review.
-- **Optional repo context.** The agent can read a read-only snapshot of the repository at the MR head
-  to check callers, definitions and tests. Finding discussions can read the same snapshot (the reviewed commit).
-  Snapshots stay in a local cache (2 GB by default, least recently used removed first, unused ones after 14 days).
-- **Editable review prompt.** Change what the reviewer checks in Settings, or reset to the built-in prompt. The
-  security rules and output format always stay.
-- **Usage guard for Claude.** One review at a time, an hourly cap, a pause between parts, and an automatic stop when
-  your plan usage reaches a threshold (shown in the panel).
-- **Saved reviews.** The last review per MR is kept on disk. It is marked "stale" when the MR gets new commits, and
-  you can delete it.
-- **In-app updates.** Settings → Updates → Check for updates shows the changelog and installs the new version
-  with one click (signed and verified). Peerlens never checks in the background.
-- Dark and light themes, keyboard shortcuts, and a small footprint: about 4 MB binary and ~0% CPU when idle.
+**Merge requests**
+- **Review / Mine / All.** MRs where you are a reviewer, MRs assigned to you, or recently updated open MRs in your
+  groups (or one group set in Settings). Grouped by project, with filter, author, target branch and a findings badge.
+  Lists load on start and on Refresh; nothing polls in the background.
+- **Fast diff viewer.** Virtualized unified or split diff, syntax highlighting loaded on demand, files grouped by
+  folder, sticky file headers, collapsed large or generated files.
+- **Commits and discussions.** Per-commit diffs and GitLab threads with a resolved filter; jump from a comment to its
+  line. GitLab Markdown and emoji are rendered safely.
 
-<details><summary>Light theme, split diff</summary>
+**AI review**
+- **One line of options.** Agent, model, reasoning effort, scope (whole MR or one file) and review language.
+- **Findings where the code is.** Each finding has a severity, explanation, the problematic snippet and a suggested
+  fix. Findings appear as slim strips under their lines in the diff and as cards in the panel, with a verdict on top
+  and severity counters that double as filters.
+- **Reviewer notes.** Tell the agent what the change is for and what to focus on, or paste the task with its
+  acceptance criteria. Pasted text is cleaned of extra indentation; notes are kept per MR.
+- **Discuss a finding.** Argue with the agent in a thread under any finding. It answers with its decision first
+  (still valid, downgraded, withdrawn) and checks fixes you propose. Threads are saved with the review.
+- **Hand it to your coding agent.** Copy a finding as Markdown: file, lines, explanation, code, suggested fix and
+  the discussion, with a reminder to verify before changing code.
+- **Optional repo context.** Let the agent read a read-only snapshot of the repository at the MR head to check
+  callers, definitions and tests. Snapshots are cached locally (2 GB by default, least recently used removed first).
+- **Large MRs.** Reviewed file by file above a size limit; lock, binary and generated files are skipped and listed.
 
-![Light theme with the split diff view](docs/screenshot-light.png)
+**Everyday use**
+- **Editable review prompt** with a reset to the built-in one; security rules and the output format always stay.
+- **Usage guard for Claude:** one review at a time, an hourly cap, a pause between parts and an automatic stop near
+  your plan limits.
+- **Saved reviews.** The last review per MR is kept on disk and marked *stale* when the MR gets new commits.
+- **In-app updates** with changelog and signature check, only when you ask.
+- Dark, light and system themes, keyboard shortcuts, about 4 MB binary and ~0% CPU when idle.
 
-</details>
-
-## Requirements
-
-- macOS (Apple Silicon or Intel) or Linux (x86_64; AppImage, .deb or .rpm). Linux support is new: please report issues.
-- [`glab`](https://gitlab.com/gitlab-org/cli), logged in (`glab auth login`). Self-hosted GitLab works via Settings → Host.
-- At least one agent CLI, logged in:
-  - Claude Code: `claude` (subscription or API key)
-  - Codex: `codex` (`codex login`)
-
-Binaries are found on `PATH`, in common install locations (`/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`, …)
-or via your login shell. You can also set their paths in Settings.
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshot-light.png" alt="Light theme with the split diff and review cards"></td>
+    <td width="50%"><img src="docs/screenshot-settings.png" alt="Settings: review defaults"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Light theme, split diff</sub></td>
+    <td align="center"><sub>Settings</sub></td>
+  </tr>
+</table>
 
 ## Install
 
-Download a package from [Releases](../../releases).
+Download a package for your system from the [latest release](https://github.com/dvxzr/Peerlens/releases/latest).
 
-**macOS:** pick the `.dmg` for your Mac: `aarch64` for Apple Silicon (M1 and later), `x64` for Intel. Drag Peerlens to
-Applications. The builds are not signed or notarized by Apple yet, so the first launch shows *"Apple could not verify
+**Requirements**
+- macOS (Apple Silicon or Intel) or Linux x86_64.
+- [`glab`](https://gitlab.com/gitlab-org/cli), logged in with `glab auth login`. Self-hosted GitLab works via
+  Settings → Connections → Host.
+- At least one agent CLI, logged in: Claude Code (`claude`, subscription or API key) or Codex (`codex login`).
+
+Binaries are found on `PATH`, in common install locations (`/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`, …)
+or through your login shell. You can also set their paths in Settings.
+
+<details>
+<summary><b>macOS</b></summary>
+
+Pick the `.dmg` for your Mac (`aarch64` for Apple Silicon, `x64` for Intel) and drag Peerlens to Applications.
+The builds are not signed or notarized by Apple yet, so the first launch shows *"Apple could not verify
 Peerlens…"*. Allow it once:
 
 1. Click **Done**.
-2. Open **System Settings → Privacy & Security**, scroll down to **Security** and click **Open Anyway** next to
-   *"Peerlens" was blocked*. Confirm with your password or Touch ID, then click **Open**.
+2. Open **System Settings → Privacy & Security**, scroll to **Security** and click **Open Anyway** next to
+   *"Peerlens" was blocked*. Confirm, then click **Open**.
 
-After that Peerlens starts normally, and in-app updates don't ask again.
-
-Prefer the terminal? Remove the quarantine flag from the downloaded `.dmg` **before** opening it (macOS doesn't let
-a terminal change apps that are already in `/Applications`):
+After that Peerlens starts normally, and in-app updates don't ask again. Prefer the terminal? Remove the quarantine
+flag from the downloaded `.dmg` **before** opening it:
 
 ```sh
 xattr -d com.apple.quarantine ~/Downloads/Peerlens_*_aarch64.dmg   # or _x64.dmg
 ```
 
-If macOS says *"Peerlens is damaged"*, you have a build from before v0.1.0 was fixed: download it again from the
-latest release.
+</details>
 
-**Linux (x86_64):**
+<details>
+<summary><b>Linux</b></summary>
 
 ```sh
 # AppImage: works on most distributions
@@ -98,21 +115,25 @@ sudo dnf install ./Peerlens-*.x86_64.rpm
 ```
 
 The `.deb` and `.rpm` pull in WebKitGTK 4.1 automatically. The AppImage needs it installed
-(`libwebkit2gtk-4.1-0` on Debian/Ubuntu, `webkit2gtk4.1` on Fedora).
+(`libwebkit2gtk-4.1-0` on Debian/Ubuntu, `webkit2gtk4.1` on Fedora). Linux support is new: please report issues.
 
-**Updating:** Settings → Updates → **Check for updates**, then **Update & restart**. This works for the macOS app,
-the AppImage, `.deb` and `.rpm` (the last two ask for your password to install). Builds made from source link to
-the download page instead.
+</details>
 
-**From source:**
+<details>
+<summary><b>From source</b></summary>
 
 ```sh
 pnpm install
 pnpm tauri build    # macOS: .app + .dmg, Linux: AppImage + .deb + .rpm, in src-tauri/target/release/bundle/
 ```
 
-Build requirements: Rust (stable, 1.82+), Node.js 20.19+, pnpm. On Linux also the WebKitGTK development packages
+Requires Rust (stable, 1.82+), Node.js 20.19+ and pnpm; on Linux also the WebKitGTK development packages
 (see the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/#linux)).
+
+</details>
+
+**Updating:** Settings → General → **Check now**, then **Update & restart**. This works for the macOS app, the
+AppImage, `.deb` and `.rpm` (the last two ask for your password). Builds made from source link to the download page.
 
 ## How a review works
 
@@ -128,13 +149,18 @@ Build requirements: Rust (stable, 1.82+), Node.js 20.19+, pnpm. On Linux also th
 
 See [SECURITY.md](SECURITY.md) for the full security model and its limitations.
 
-## Settings
+## Configuration
+
+Everything is set in the app (⌘,). Files live here:
 
 | | macOS | Linux |
 |---|---|---|
 | Settings | `~/Library/Application Support/peerlens/settings.json` | `~/.config/peerlens/settings.json` |
 | Saved reviews | `~/Library/Application Support/peerlens/reviews/` | `~/.local/share/peerlens/reviews/` |
 | Repo snapshots | `~/Library/Caches/peerlens/snapshots/` | `~/.cache/peerlens/snapshots/` |
+
+<details>
+<summary><b>Defaults</b></summary>
 
 | Setting | Default |
 |---|---|
@@ -145,14 +171,16 @@ See [SECURITY.md](SECURITY.md) for the full security model and its limitations.
 | Review prompt | Built-in (editable, with reset) |
 | Review file by file above | 120,000 bytes of diff |
 | Agent timeout | 900 s per part |
-| Pause when Claude usage reaches | 80% |
+| Pause at Claude usage | 80% |
 | Max reviews per hour / agent runs per review / pause between parts | 20 / 25 / 3 s |
 | Repo context archive limit | 300 MB |
 | Repo snapshot cache | 2 GB (Settings → Repo context → Clear empties it) |
 | Never unpack (repo context) | `.env*`, `*.pem`, `*.key`, `*secret*`, `*credential*`, … |
 | GitLab host, group for "All", binary paths | glab's default host; all your groups; auto-detect |
 
-## Shortcuts
+</details>
+
+### Keyboard shortcuts
 
 On Linux use Ctrl instead of ⌘.
 
@@ -163,7 +191,7 @@ On Linux use Ctrl instead of ⌘.
 | ⌘1 / ⌘2 / ⌘3 | Changes / Commits / Discussions |
 | ⌘↵ | Start review |
 | ⌘B / ⌘J | Toggle the MR sidebar / the review panel |
-| ⌘, | Settings |
+| ⌘, | Settings (⌘S saves) |
 | Shift + wheel | Scroll the diff sideways (trackpad swipes work too; in split view both sides move together) |
 
 ## Development
@@ -179,7 +207,12 @@ cargo test                          # unit + end-to-end tests with fake glab/cla
 cargo fmt --check && cargo clippy --all-targets -- -D warnings
 ```
 
-Opt-in tests against real services (they read your GitLab and use your agent subscription):
+The README screenshots are taken from `dev/mock.html`, so they show fictional data only.
+
+<details>
+<summary><b>Tests against real services</b></summary>
+
+These read your GitLab and use your agent subscription:
 
 ```sh
 cargo test --test live_glab live_read_flow -- --ignored --nocapture        # GitLab, GET only
@@ -187,7 +220,10 @@ cargo test --test live_glab live_claude_review -- --ignored --nocapture    # one
 PEERLENS_CODEX_BIN=$(command -v codex) cargo test --test live_glab live_codex_argv -- --ignored --nocapture
 ```
 
-Layout:
+</details>
+
+<details>
+<summary><b>Project layout</b></summary>
 
 ```
 src-tauri/src/
@@ -199,10 +235,13 @@ src-tauri/src/
 src/           Svelte 5 UI (no UI kit; custom diff renderer, Markdown renderer, icons)
 fixtures/      fake glab / claude / codex used by tests
 dev/           mock backend for working on the UI in a browser
-scripts/       app icon source (swift scripts/icon.swift icon.png && pnpm tauri icon icon.png)
+scripts/       release helpers and the app icon source (swift scripts/icon.swift icon.png && pnpm tauri icon icon.png)
 ```
 
-## Releasing
+</details>
+
+<details>
+<summary><b>Releasing</b></summary>
 
 1. One-time: create the updater signing key and add it to the repository secrets
    (Settings → Secrets and variables → Actions):
@@ -224,10 +263,17 @@ scripts/       app icon source (swift scripts/icon.swift icon.png && pnpm tauri 
    run once, in parallel with the builds; if they fail, `latest.json` is not uploaded. Check that the run is green,
    review the draft and publish; installed apps see the update only after that.
 
+</details>
+
 ## Roadmap
 
 GitHub support, optional auto-refresh, signed and notarized macOS builds, Linux ARM builds.
 
+## Contributing
+
+Issues and pull requests are welcome. Please run `pnpm check`, `cargo fmt --check`, `cargo clippy` and `cargo test`
+before opening a PR, and report security issues as described in [SECURITY.md](SECURITY.md).
+
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) © 2026 Artem

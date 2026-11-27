@@ -92,6 +92,16 @@
   $effect(() => {
     if (sev && !counts.some(([s]) => s === sev)) sev = null;
   });
+  const SEV_COLOR: Record<string, string> = { critical: "var(--red)", major: "var(--orange)", minor: "var(--yellow)" };
+  // Headline over the summary, derived from the worst finding.
+  let verdict = $derived.by((): { label: string; color: string; icon: "alert" | "checkCircle" | "sparkles" } => {
+    if (r?.running) return { label: "Summary so far", color: "var(--accent)", icon: "sparkles" };
+    const w = counts[0]?.[0];
+    if (w === "critical") return { label: "Changes required", color: SEV_COLOR.critical, icon: "alert" };
+    if (w === "major") return { label: "Changes recommended", color: SEV_COLOR.major, icon: "alert" };
+    if (w) return { label: "Minor changes", color: SEV_COLOR.minor, icon: "alert" };
+    return { label: "Looks good", color: "var(--green)", icon: "checkCircle" };
+  });
 
   // Optional reviewer notes, remembered per MR (the panel is reused when switching MRs).
   const MAX_NOTES = 20000; // keep in sync with review::prompt::MAX_NOTES
@@ -233,7 +243,7 @@
 </script>
 
 {#snippet card(f: Finding, i: number)}
-  <div class="card sevb-{f.severity}" id="finding-{i}" in:fly={{ y: 8, duration: 220, easing: cubicOut }}>
+  <div class="card" id="finding-{i}" in:fly={{ y: 8, duration: 220, easing: cubicOut }}>
     <div class="head">
       <span class="sev sev-{f.severity}">{f.severity}</span>
       <span class="cat">{f.category}</span>
@@ -452,14 +462,16 @@
         </details>
       {/if}
       {#if r.summaries.length}
-        <div class="group sumh"><Icon name="checkCircle" size={13} />Summary</div>
-        {#each r.summaries as s, i (i)}<div class="summary" in:fade={{ duration: 200 }}><Rich text={s} /></div>{/each}
+        <div class="verdict" style:--vc={verdict.color}>
+          <div class="vh"><Icon name={verdict.icon} size={14} />{verdict.label}</div>
+          {#each r.summaries as s, i (i)}<div class="summary" in:fade={{ duration: 200 }}><Rich text={s} /></div>{/each}
+        </div>
       {/if}
       {#if counts.length}
-        <div class="tabs" role="tablist">
-          <button class:on={!sev} role="tab" aria-selected={!sev} onclick={() => (sev = null)}>All <span class="dim">{r.findings.length}</span></button>
+        <div class="tiles" role="tablist">
+          <button class="tile" class:on={!sev} role="tab" aria-selected={!sev} onclick={() => (sev = null)}><b>{r.findings.length}</b><span>All</span></button>
           {#each counts as [s, n] (s)}
-            <button class:on={sev === s} role="tab" aria-selected={sev === s} onclick={() => (sev = s)} title={s}><i class="dot sevd-{s}"></i>{n} <span class="dim">{s}</span></button>
+            <button class="tile" class:on={sev === s} role="tab" aria-selected={sev === s} onclick={() => (sev = s)} style:--tc={SEV_COLOR[s] ?? "var(--text2)"}><b>{n}</b><span>{s}</span></button>
           {/each}
         </div>
       {/if}
@@ -498,14 +510,10 @@
   .panel { display: flex; flex-direction: column; height: 100%; min-width: 0; min-height: 0; background: var(--bg0); }
   .controls { flex: none; }
   .results { min-height: 0; }
-  .controls { padding: 10px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; position: relative; }
-  .run {
-    display: flex; flex-direction: column; gap: 9px; padding: 9px 10px 10px; border-radius: 12px;
-    background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 14%, transparent), color-mix(in srgb, var(--accent) 4%, transparent));
-    border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
-  }
+  .controls { padding: 12px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; position: relative; }
+  .run { display: flex; flex-direction: column; gap: 8px; }
   /* Summary line: each Menu renders as a flat, clickable word. */
-  .cfg { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-width: 0; }
+  .cfg { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-width: 0; padding: 3px; border-radius: 10px; background: var(--bg2); border: 1px solid var(--border); }
   .cfg :global(.menu .trigger) { background: transparent; border-color: transparent; padding: 2px 6px; gap: 5px; font-size: 12px; color: var(--text2); border-radius: 6px; }
   .cfg :global(.menu .trigger:hover), .cfg :global(.menu .trigger.open) { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
   .cfg :global(.menu .trigger.open) { box-shadow: inset 0 0 0 1px var(--accent); }
@@ -516,8 +524,8 @@
   .rc:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text); }
   .rc.on { border-style: solid; border-color: transparent; background: var(--accent-bg); color: var(--accent); }
   .rc.on:hover:not(:disabled) { background: var(--accent-bg); color: var(--accent); }
-  .nadd { justify-content: flex-start; gap: 6px; padding: 2px 4px; border: none; background: transparent; color: var(--text3); font-size: 12px; }
-  .nadd:hover:not(:disabled) { background: transparent; color: var(--text); }
+  .nadd { justify-content: flex-start; gap: 7px; height: 30px; padding: 0 10px; border: 1px dashed var(--border2); border-radius: 9px; background: transparent; color: var(--text3); font-size: 12px; }
+  .nadd:hover:not(:disabled) { background: var(--bg2); color: var(--text); border-color: var(--text3); }
   .nadd:active:not(:disabled) { transform: none; }
   .notes { display: flex; flex-direction: column; gap: 6px; }
   .notes textarea { width: 100%; resize: none; min-height: 64px; max-height: 240px; overflow-y: auto; font-size: 12px; line-height: 1.5; background: var(--bg1); border-color: var(--border2); }
@@ -541,7 +549,8 @@
   .uline .bar { flex: 1; }
   .custom { display: flex; gap: 6px; }
   .custom input { flex: 1; min-width: 0; height: 30px; }
-  .go { flex: 1; height: 34px; font-size: 13.5px; }
+  .go { flex: 1; height: 34px; font-size: 13.5px; border-radius: 9px; background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 88%, white), var(--accent2)); box-shadow: 0 1px 0 rgba(255, 255, 255, .12) inset, 0 4px 14px -6px var(--accent); }
+  .go:hover:not(:disabled) { background: var(--accent2); }
   kbd { font: 500 10.5px var(--mono); opacity: .65; margin-left: 4px; }
   .note-warn { display: flex; gap: 7px; align-items: flex-start; font-size: 11.5px; color: var(--orange); line-height: 1.4; }
   .note-warn :global(svg) { flex: none; margin-top: 1px; }
@@ -568,34 +577,31 @@
   .del { margin-left: auto; padding: 2px 8px; font-size: 11.5px; gap: 5px; color: var(--text3); white-space: nowrap; }
   .del:hover:not(:disabled) { color: var(--red); }
   .del.confirm { color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); }
-  .tabs { display: flex; gap: 2px; margin: 0 -2px 8px; border-bottom: 1px solid var(--border); overflow-x: auto; }
-  .tabs button {
-    border: none; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; padding: 5px 8px; gap: 5px;
-    font-size: 12px; color: var(--text2); white-space: nowrap;
-  }
-  .tabs button:hover:not(:disabled) { background: transparent; color: var(--text); }
-  .tabs button:active:not(:disabled) { transform: none; }
-  .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text3); }
-  .sevd-critical { background: var(--red); } .sevd-major { background: var(--orange); } .sevd-minor { background: var(--yellow); }
+  /* Severity counters double as the filter. */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(62px, 1fr)); gap: 6px; margin: 2px 0 10px; }
+  .tile { flex-direction: column; align-items: flex-start; gap: 0; padding: 5px 9px 6px; border-radius: 9px; background: var(--bg2); border: 1px solid var(--border); }
+  .tile b { font-size: 15px; font-weight: 700; line-height: 1.3; color: var(--tc, var(--text)); font-variant-numeric: tabular-nums; }
+  .tile span { font-size: 10.5px; color: var(--text3); text-transform: capitalize; }
+  .tile:hover:not(:disabled) { background: var(--bg3); }
+  .tile.on { background: var(--bg3); border-color: color-mix(in srgb, var(--tc, var(--accent)) 45%, transparent); }
   .group { display: flex; align-items: center; gap: 6px; font-weight: 600; margin: 14px 0 6px; font-size: 12px; color: var(--text2); overflow-wrap: anywhere; }
   .group :global(svg) { color: var(--text3); flex: none; }
   .card {
-    background: var(--bg2); border: 1px solid var(--border); border-left-width: 3px; border-radius: 11px; padding: 10px 12px; margin-bottom: 8px;
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 12px; padding: 11px 12px 0; margin-bottom: 8px;
     transition: box-shadow 300ms var(--ease), border-color 300ms var(--ease);
   }
-  .sevb-critical { border-left-color: var(--red); } .sevb-major { border-left-color: var(--orange); }
-  .sevb-minor { border-left-color: var(--yellow); } .sevb-nit { border-left-color: var(--text3); }
+  .card:not(:has(.cfoot)) { padding-bottom: 12px; } /* no footer while the review is running */
   .card:global(.flash) { box-shadow: 0 0 0 2px var(--accent); }
   .head { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .cat { font-size: 11px; color: var(--text3); }
   .fcopy { margin-left: auto; width: 24px; height: 22px; color: var(--text3); }
   .loc ~ .fcopy { margin-left: 0; }
   .fcopy.done { color: var(--green); }
-  .loc { margin-left: auto; padding: 1px 7px; border: none; background: var(--bg3); color: var(--accent); font-size: 11px; border-radius: 6px; }
-  .ftitle { font-weight: 600; margin: 6px 0 2px; line-height: 1.35; }
-  .text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; color: var(--text); line-height: 1.5; }
-  .sugg { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border2); }
+  .loc { margin-left: auto; padding: 1px 7px; border: none; background: var(--accent-bg); color: var(--accent); font-size: 11px; border-radius: 6px; }
+  .ftitle { font-weight: 650; font-size: 13px; margin: 8px 0 2px; line-height: 1.35; }
+  .text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0; color: var(--text2); line-height: 1.5; }
+  .sugg { margin-top: 10px; padding: 8px 10px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 6%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent); }
+  .sugg .text { color: var(--text); }
   .sl { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; color: var(--accent); text-transform: uppercase; letter-spacing: .04em; }
   .code { background: var(--bg1); padding: 8px 10px; border-radius: 8px; overflow-x: auto; margin: 6px 0; white-space: pre; border: 1px solid var(--border); line-height: 1.5; }
   .code.bad { border-left: 3px solid var(--red); }
@@ -608,11 +614,11 @@
   .copy { font-size: 11px; padding: 2px 8px; gap: 4px; background: transparent; border-color: transparent; }
   .copy:hover:not(:disabled) { background: var(--bg4); }
   .copy.done { color: var(--green); }
-  .cfoot { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+  .cfoot { display: flex; align-items: center; gap: 6px; margin: 10px -12px 0; padding: 5px 8px; border-top: 1px solid var(--border); }
   .disc { padding: 2px 8px; gap: 5px; font-size: 11.5px; }
   .disc.on { color: var(--accent); }
   .tcount { display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; border-radius: 999px; background: var(--accent-bg); color: var(--accent); font-size: 11px; }
-  .thread { margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+  .thread { padding: 10px 0 12px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
   .ctx { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; font-size: 11px; color: var(--text3); }
   .pill { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 6px; background: var(--bg3); color: var(--text2); font-size: 11px; }
   .pill.stalep { background: color-mix(in srgb, var(--yellow) 12%, transparent); color: var(--yellow); }
@@ -642,8 +648,13 @@
   .tacts summary { cursor: pointer; display: flex; align-items: center; gap: 5px; color: var(--text3); list-style: none; }
   .tacts .act { padding-left: 16px; }
   .tnote { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text3); }
-  .sumh { margin-top: 0; }
-  .summary { margin-bottom: 10px; background: var(--bg2); border: 1px solid var(--border); padding: 10px 12px; border-radius: 11px; white-space: pre-wrap; line-height: 1.5; }
+  .verdict {
+    margin-bottom: 10px; padding: 10px 12px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--vc) 28%, transparent);
+    background: linear-gradient(180deg, color-mix(in srgb, var(--vc) 10%, transparent), color-mix(in srgb, var(--vc) 3%, transparent));
+  }
+  .vh { display: flex; align-items: center; gap: 7px; font-weight: 700; font-size: 13px; }
+  .vh :global(svg) { color: var(--vc); }
+  .summary { margin-top: 6px; white-space: pre-wrap; line-height: 1.5; color: var(--text2); }
   .warn { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 9px; color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); font-size: 12px; margin-bottom: 6px; overflow-wrap: anywhere; }
   .warn :global(svg) { flex: none; margin-top: 1px; }
   .skipped { margin-top: 14px; font-size: 12px; }

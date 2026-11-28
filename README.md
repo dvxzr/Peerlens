@@ -53,6 +53,11 @@ with read requests. Nothing is committed, applied or posted: findings stay in th
 - **Usage guard for Claude:** one review at a time, an hourly cap, a pause between parts and an automatic stop near
   your plan limits.
 - **Saved reviews.** The last review per MR is kept on disk and marked *stale* when the MR gets new commits.
+- **Review only new commits.** When a reviewed MR moves on, review just what changed since the saved review. Earlier
+  findings and their discussions are kept: they follow their code when it moved and are marked *outdated* when the
+  new commits changed it.
+- **Track what's done.** Mark findings *fixed* or *dismissed*. Closed findings fold up, leave the diff and the
+  counters, and the verdict turns green when nothing is left. Copy all open findings as Markdown in one go.
 - **In-app updates** with changelog and signature check, only when you ask.
 - Dark, light and system themes, keyboard shortcuts, about 4 MB binary and ~0% CPU when idle.
 
@@ -190,6 +195,8 @@ On Linux use Ctrl instead of ⌘.
 | ⌘F | Filter merge requests (Esc clears) |
 | ⌘1 / ⌘2 / ⌘3 | Changes / Commits / Discussions |
 | ⌘↵ | Start review |
+| N / P | Next / previous open finding (in the diff and the panel) |
+| ] / [ | Next / previous file |
 | ⌘B / ⌘J | Toggle the MR sidebar / the review panel |
 | ⌘, | Settings (⌘S saves) |
 | Shift + wheel | Scroll the diff sideways (trackpad swipes work too; in split view both sides move together) |

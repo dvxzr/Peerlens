@@ -1,6 +1,6 @@
 [package]
 name = "peerlens"
-version = "0.3.3"
+version = "0.4.0"
 edition = "2021"
 description = "Desktop app for reviewing GitLab merge requests with a local, read-only AI agent"
 license = "MIT"

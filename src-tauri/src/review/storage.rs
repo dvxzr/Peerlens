@@ -10,6 +10,9 @@ pub struct StoredReview {
     pub project_id: u64,
     pub iid: u64,
     pub head_sha: String,
+    /// Incremental review: the head of the earlier review whose findings were carried over; "" = full review.
+    #[serde(default)]
+    pub since: String,
     pub agent: String,
     pub model: String,
     #[serde(default)]

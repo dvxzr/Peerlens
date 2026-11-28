@@ -13,7 +13,7 @@
   import Icon from "./Icon.svelte";
   import Markdown from "./Markdown.svelte";
   import { pref, setPref } from "../lib/prefs";
-  import { avatarColor, initials, worstSeverity } from "../lib/text";
+  import { avatarColor, initials, unresolved as isOpenFinding, worstSeverity } from "../lib/text";
 
   let { mr, settings, agents, sidebarOpen, onshowsidebar }: {
     mr: MrSummary; settings: Settings; agents: AgentInfo[]; sidebarOpen: boolean; onshowsidebar: () => void;
@@ -73,6 +73,7 @@
     const pid = mr.project_id, iid = mr.iid;
     untrack(() => {
       currentFile = null;
+      navAt = -1;
       reload();
       ensureLoaded(pid, iid);
     });
@@ -86,7 +87,7 @@
   let markers = $derived.by(() => {
     const m = new Map<string, Marker[]>();
     (get(mr.project_id, mr.iid)?.findings ?? []).forEach((f, id) => {
-      if (!f.anchored || f.start_line == null) return;
+      if (!f.anchored || f.start_line == null || !isOpenFinding(f)) return;
       const k = `${f.file}:${f.start_line}`;
       (m.get(k) ?? m.set(k, []).get(k)!).push({ severity: f.severity, title: f.title, id });
     });
@@ -94,7 +95,7 @@
   });
   let findingsByFile = $derived.by(() => {
     const m = new Map<string, string[]>();
-    for (const f of get(mr.project_id, mr.iid)?.findings ?? []) (m.get(f.file) ?? m.set(f.file, []).get(f.file)!).push(f.severity);
+    for (const f of (get(mr.project_id, mr.iid)?.findings ?? []).filter(isOpenFinding)) (m.get(f.file) ?? m.set(f.file, []).get(f.file)!).push(f.severity);
     return m;
   });
 
@@ -111,7 +112,40 @@
     queueMicrotask(() => document.querySelector(".frow.cur")?.scrollIntoView({ block: "nearest" }));
   }
 
+  // Open findings in diff order (file, then line); ones not tied to a file come last.
+  let nav = $derived.by(() => {
+    const order = new Map((files ?? []).map((f, k) => [f.new_path || f.old_path, k]));
+    return (get(mr.project_id, mr.iid)?.findings ?? [])
+      .map((f, i) => ({ f, i }))
+      .filter(({ f }) => isOpenFinding(f))
+      .sort((a, b) => (order.get(a.f.file) ?? 1e9) - (order.get(b.f.file) ?? 1e9) || (a.f.start_line ?? 0) - (b.f.start_line ?? 0));
+  });
+  let navAt = -1;
+  async function stepFinding(d: 1 | -1) {
+    const n = nav.length;
+    if (!n) return;
+    navAt = navAt < 0 || navAt >= n ? (d > 0 ? 0 : n - 1) : (navAt + d + n) % n;
+    const { f, i } = nav[navAt];
+    if (f.file && files?.some((x) => x.new_path === f.file || x.old_path === f.file)) await showFile(f.file, f.anchored ? f.start_line : null);
+    panelOpen = true;
+    await tick();
+    panel?.reveal(i);
+  }
+  function stepFile(d: 1 | -1) {
+    if (!files?.length) return;
+    const k = files.findIndex((f) => (f.new_path || f.old_path) === currentFile);
+    const next = files[k < 0 ? (d > 0 ? 0 : files.length - 1) : Math.min(files.length - 1, Math.max(0, k + d))];
+    showFile(next.new_path || next.old_path);
+  }
+
   function keys(e: KeyboardEvent) {
+    const el = e.target as HTMLElement | null;
+    const typing = !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+    if (!e.metaKey && !e.ctrlKey && !e.altKey && !typing) {
+      const step = ({ n: () => stepFinding(1), p: () => stepFinding(-1), "]": () => stepFile(1), "[": () => stepFile(-1) } as Record<string, () => void>)[e.key];
+      if (step) { e.preventDefault(); step(); }
+      return;
+    }
     if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return;
     const t = ({ "1": "changes", "2": "commits", "3": "discussions" } as const)[e.key as "1" | "2" | "3"];
     if (t) { e.preventDefault(); tab = t; }

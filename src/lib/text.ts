@@ -41,6 +41,9 @@ export const initials = (u: { name: string; username: string }) =>
 /** A stable per-user avatar color. */
 export const avatarColor = (username: string) => `hsl(${[...username].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7)} 55% 62%)`;
 
+/** A finding still to act on: not marked fixed or dismissed (an outdated one still counts). */
+export const unresolved = (f: { status?: string }) => !f.status || f.status === "outdated";
+
 const SEVERITIES = ["critical", "major", "minor", "nit"];
 /** The most severe of the given finding severities ("nit" when none is known). */
 export const worstSeverity = (sevs: string[]) => SEVERITIES.find((s) => sevs.includes(s)) ?? "nit";

@@ -32,9 +32,13 @@ pub struct Finding {
     /// Set by us after checking the lines exist in the diff.
     #[serde(default)]
     pub anchored: bool,
+    /// Set by us: "" = open, "fixed" / "dismissed" (by the user), "outdated" (its code changed in new commits).
+    #[serde(default)]
+    pub status: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)] // one short-lived value per output line
 pub enum Item {
     Finding(Finding),
     Summary(String),
@@ -71,6 +75,7 @@ pub fn parse_line(line: &str) -> Option<Item> {
                 }
             }
             f.anchored = false;
+            f.status.clear();
             Some(Item::Finding(f))
         }
         "summary" => Some(Item::Summary(v.get("text")?.as_str()?.to_string())),

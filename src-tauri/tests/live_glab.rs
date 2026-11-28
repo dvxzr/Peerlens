@@ -111,6 +111,7 @@ async fn live_claude_review() {
             ..Limits::default()
         },
         StoredReview::default(),
+        None,
         &mut rx,
         &emit,
     )

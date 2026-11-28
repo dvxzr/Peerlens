@@ -1,7 +1,7 @@
 <script lang="ts">
   import { kb } from "../lib/platform";
   import type { AgentInfo, AgentKind, Finding, MenuItem as Item, Settings } from "../lib/types";
-  import { start, get, usage, loadUsage, remove, discuss, removeThread } from "../lib/review.svelte";
+  import { start, get, usage, loadUsage, remove, discuss, removeThread, setStatus } from "../lib/review.svelte";
   import Markdown from "./Markdown.svelte";
   import { api } from "../lib/api";
   import { ago } from "../lib/time";
@@ -14,7 +14,7 @@
   import Icon from "./Icon.svelte";
   import Rich from "./Rich.svelte";
   import { CLAUDE_MODELS, EFFORTS, LANGUAGES, codexEfforts } from "../lib/options";
-  import { dedent, pasteSqueezed } from "../lib/text";
+  import { dedent, pasteSqueezed, unresolved } from "../lib/text";
 
   let { projectId, iid, headSha, agents, settings, currentFile, onjump }: {
     projectId: number; iid: number; headSha: string; agents: AgentInfo[]; settings: Settings;
@@ -73,25 +73,29 @@
   let stale = $derived(!!r && !r.running && !!r.headSha && !!headSha && r.headSha !== headSha);
   const sevOrder: Record<string, number> = { critical: 0, major: 1, minor: 2, nit: 3 };
 
-  // Severity filter; reset when a new review no longer has that severity.
+  // Severity filter ("resolved" = fixed or dismissed); reset when a new review no longer has that kind.
   let sev = $state<string | null>(null);
+  const shown = (f: Finding) => !sev || (sev === "resolved" ? !unresolved(f) : unresolved(f) && f.severity === sev);
   let grouped = $derived.by(() => {
     const m = new Map<string, { f: Finding; i: number }[]>();
     (r?.findings ?? []).forEach((f, i) => {
-      if (!f.anchored || (sev && f.severity !== sev)) return;
+      if (!f.anchored || !shown(f)) return;
       (m.get(f.file) ?? m.set(f.file, []).get(f.file)!).push({ f, i });
     });
     for (const v of m.values()) v.sort((a, b) => (a.f.start_line ?? 0) - (b.f.start_line ?? 0));
     return [...m.entries()];
   });
-  let unanchored = $derived((r?.findings ?? []).map((f, i) => ({ f, i })).filter((x) => !x.f.anchored && (!sev || x.f.severity === sev)));
+  let unanchored = $derived((r?.findings ?? []).map((f, i) => ({ f, i })).filter((x) => !x.f.anchored && shown(x.f)));
+  let open = $derived((r?.findings ?? []).filter(unresolved));
+  let resolvedN = $derived((r?.findings.length ?? 0) - open.length);
+  // Severity counters count only findings still to act on.
   let counts = $derived(
-    Object.entries((r?.findings ?? []).reduce((a, f) => ((a[f.severity] = (a[f.severity] ?? 0) + 1), a), {} as Record<string, number>))
+    Object.entries(open.reduce((a, f) => ((a[f.severity] = (a[f.severity] ?? 0) + 1), a), {} as Record<string, number>))
       .sort(([a], [b]) => (sevOrder[a] ?? 9) - (sevOrder[b] ?? 9)),
   );
 
   $effect(() => {
-    if (sev && !counts.some(([s]) => s === sev)) sev = null;
+    if (sev && !(sev === "resolved" ? resolvedN : counts.some(([s]) => s === sev))) sev = null;
   });
   const SEV_COLOR: Record<string, string> = { critical: "var(--red)", major: "var(--orange)", minor: "var(--yellow)" };
   // Headline over the summary, derived from the worst finding.
@@ -101,6 +105,7 @@
     if (w === "critical") return { label: "Changes required", color: SEV_COLOR.critical, icon: "alert" };
     if (w === "major") return { label: "Changes recommended", color: SEV_COLOR.major, icon: "alert" };
     if (w) return { label: "Minor changes", color: SEV_COLOR.minor, icon: "alert" };
+    if (resolvedN) return { label: "All findings resolved", color: "var(--green)", icon: "checkCircle" };
     return { label: "Looks good", color: "var(--green)", icon: "checkCircle" };
   });
 
@@ -173,13 +178,23 @@
     t.style.height = `${t.scrollHeight + 2}px`;
   }
 
-  function run() {
+  // The MR got new commits after a whole-MR review: review only those and keep the earlier findings.
+  let canIncrement = $derived(stale && r?.scope === "whole MR" && scope === "mr");
+  function run(full = false) {
     if (r?.running || r?.chat || (scope === "file" && !currentFile) || overLimit || codexNotLoggedIn) return;
-    openThread = null; // a new review replaces findings and their threads
-    start(projectId, iid, agent, model, effort, scope === "file" ? currentFile : null, language, repoContext, notes.trim());
+    const since = canIncrement && !full ? r!.headSha : null;
+    openThread = null; // a full review replaces findings and their threads
+    start(projectId, iid, agent, model, effort, scope === "file" ? currentFile : null, language, repoContext, notes.trim(), since);
   }
   function keys(e: KeyboardEvent) {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); run(); }
+  }
+  let statusErr = $state("");
+  async function mark(i: number, status: "fixed" | "dismissed") {
+    try {
+      await setStatus(projectId, iid, i, r?.findings[i]?.status === status ? "" : status);
+      statusErr = "";
+    } catch (e) { statusErr = String(e); }
   }
   const mb = (b: number) => (b / 1_048_576).toFixed(1);
   let confirmDelete = $state(false);
@@ -227,6 +242,11 @@
     out.push("", "This finding comes from an automated review. Verify it against the current code before changing anything; the suggested fix was not run.");
     return out.join("\n");
   }
+  /** Every open finding, in panel order, as one Markdown document. */
+  function allText() {
+    const items = [...grouped.flatMap(([, v]) => v), ...unanchored].filter(({ f }) => unresolved(f));
+    return items.map(({ f, i }) => findingText(f, i)).join("\n\n---\n\n");
+  }
   /** Scroll the panel to a finding (used by inline diff markers). */
   export function reveal(i: number) {
     const el = document.getElementById(`finding-${i}`);
@@ -237,10 +257,13 @@
 </script>
 
 {#snippet card(f: Finding, i: number)}
-  <div class="card" id="finding-{i}" in:fly|global={{ y: 12, duration: r?.running ? 420 : 0, easing: cubicOut }}>
+  {@const done = !unresolved(f)}
+  <div class="card" class:done id="finding-{i}" in:fly|global={{ y: 12, duration: r?.running ? 420 : 0, easing: cubicOut }}>
     <div class="head">
       <span class="sev sev-{f.severity}">{f.severity}</span>
       <span class="cat">{f.category}</span>
+      {#if f.status === "outdated"}<span class="pill stalep" title="New commits changed this code. Check whether the finding still applies."><Icon name="clock" size={11} />outdated</span>{/if}
+      {#if done}<span class="pill okp"><Icon name="check" size={11} />{f.status}</span>{/if}
       {#if f.file}
         <button class="loc mono" onclick={() => onjump(f.file, f.anchored ? f.start_line : null)} title="Show in diff">
           {f.file.split("/").pop()}{f.start_line != null ? `:${f.start_line}${f.end_line && f.end_line !== f.start_line ? "–" + f.end_line : ""}` : ""}
@@ -252,6 +275,7 @@
       </button>
     </div>
     <div class="ftitle"><Rich text={f.title} /></div>
+    {#if !done}
     <div class="text"><Rich text={f.explanation} /></div>
     {#if f.snippet}<pre class="code bad">{dedent(f.snippet)}</pre>{/if}
     {#if f.suggestion && (f.suggestion.description || f.suggestion.code)}
@@ -271,6 +295,7 @@
         {/if}
       </div>
     {/if}
+    {/if}
     {#if r?.createdAt && !r.running}
       {@const thread = r.threads[i] ?? []}
       <div class="cfoot">
@@ -278,6 +303,9 @@
           <Icon name="message" size={13} />Discuss
         </button>
         {#if thread.length}<span class="tcount" title="{thread.length} messages"><Icon name="message" size={11} />{thread.length}</span>{/if}
+        <span class="sp"></span>
+        <button class="ghost stbtn" class:on={f.status === "fixed"} onclick={() => mark(i, "fixed")} title={f.status === "fixed" ? "Reopen" : "Mark as fixed"}><Icon name="check" size={13} />Fixed</button>
+        <button class="ghost stbtn" class:on={f.status === "dismissed"} onclick={() => mark(i, "dismissed")} title={f.status === "dismissed" ? "Reopen" : "Dismiss: not worth fixing or not a real problem"}><Icon name="x" size={13} />Dismiss</button>
       </div>
       {#if openThread === i}
         <div class="thread" transition:slide={{ duration: 260, easing: cubicOut }}>
@@ -406,10 +434,13 @@
             <button class="stopbtn" onclick={() => api.cancelReview()}><Icon name="stop" size={14} />Cancel</button>
             <span class="prog dim">{r.repoStage === "downloading" ? "Downloading repo…" : r.progress ? `Part ${r.progress.chunk} of ${r.progress.total}` : "Starting…"}</span>
           {:else}
-            <button class="primary go" onclick={run} disabled={!!r?.chat || (scope === "file" && !currentFile) || overLimit || codexNotLoggedIn}
-              title={overLimit ? `Paused: usage is over ${settings.max_usage_pct}%` : `Run a read-only review (${kb("↵")})`}>
-              <Icon name="sparkles" size={15} />{r?.createdAt ? "Re-review" : "Review"}<kbd>{kb("↵")}</kbd>
+            <button class="primary go" onclick={() => run()} disabled={!!r?.chat || (scope === "file" && !currentFile) || overLimit || codexNotLoggedIn}
+              title={overLimit ? `Paused: usage is over ${settings.max_usage_pct}%` : canIncrement ? `Review only the commits pushed since the saved review and keep its findings (${kb("↵")})` : `Run a read-only review (${kb("↵")})`}>
+              <Icon name="sparkles" size={15} />{canIncrement ? "Review new commits" : r?.createdAt ? "Re-review" : "Review"}<kbd>{kb("↵")}</kbd>
             </button>
+            {#if canIncrement}
+              <button class="full" onclick={() => run(true)} disabled={!!r?.chat || overLimit || codexNotLoggedIn} title="Review the whole MR again; replaces the saved findings">Full</button>
+            {/if}
           {/if}
         </div>
       </div>
@@ -432,12 +463,19 @@
         {#if stale}<span class="pill stale" title="The MR head changed since this review"><Icon name="clock" size={11} />stale</span>{/if}
         {#if r.cancelled}<span class="pill">cancelled</span>{/if}
         {#if !r.running && r.createdAt}
+          {#if open.length}
+            <button class="ghost icon allcopy" class:done={copied === "all"} onclick={() => copy(allText(), "all")}
+              title={copied === "all" ? "Copied" : "Copy all open findings as Markdown for an agent"} aria-label="Copy open findings">
+              <Icon name={copied === "all" ? "check" : "copy"} size={13} />
+            </button>
+          {/if}
           <button class="ghost del" class:confirm={confirmDelete} onclick={del} title="Delete this saved review">
             <Icon name="trash" size={13} />{confirmDelete ? "Click again to delete" : "Delete"}
           </button>
         {/if}
       </div>
       {#if delErr}<div class="warn"><Icon name="alert" size={14} /><span>{delErr}</span></div>{/if}
+      {#if statusErr}<div class="warn"><Icon name="alert" size={14} /><span>{statusErr}</span></div>{/if}
       {#if r.repo}
         <div class="repo dim"><Icon name="folder" size={13} />Repo snapshot: {r.repo.files} files, {mb(r.repo.bytes)} MB{r.repo.excluded.length ? ` · ${r.repo.excluded.length} secret file(s) excluded` : ""}</div>
       {/if}
@@ -453,12 +491,15 @@
           {#each r.summaries as s, i (i)}<div class="summary" in:fade={{ duration: 300 }}><Rich text={s} /></div>{/each}
         </div>
       {/if}
-      {#if counts.length}
+      {#if r.findings.length}
         <div class="tiles" role="tablist">
           <button class="tile" class:on={!sev} role="tab" aria-selected={!sev} onclick={() => (sev = null)}><b>{r.findings.length}</b><span>All</span></button>
           {#each counts as [s, n] (s)}
             <button class="tile" class:on={sev === s} role="tab" aria-selected={sev === s} onclick={() => (sev = s)} style:--tc={SEV_COLOR[s] ?? "var(--text2)"}><b>{n}</b><span>{s}</span></button>
           {/each}
+          {#if resolvedN}
+            <button class="tile" class:on={sev === "resolved"} role="tab" aria-selected={sev === "resolved"} onclick={() => (sev = "resolved")} title="Marked fixed or dismissed" style:--tc="var(--green)"><b>{resolvedN}</b><span>Resolved</span></button>
+          {/if}
         </div>
       {/if}
       {#each r.errors as e, i (i)}<div class="warn" transition:slide={{ duration: 260, easing: cubicOut }}><Icon name="alert" size={14} /><span>{e}</span></div>{/each}
@@ -560,6 +601,15 @@
   .meta { display: flex; gap: 6px; align-items: center; font-size: 11.5px; margin-bottom: 8px; }
   .meta > :global(*) { flex: none; }
   .meta > .mtxt { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .allcopy { margin-left: auto; width: 24px; height: 22px; color: var(--text3); }
+  .allcopy.done { color: var(--green); }
+  .allcopy + .del { margin-left: 0; }
+  .full { height: 34px; padding: 0 12px; font-size: 12.5px; border-radius: 9px; }
+  .stbtn { padding: 2px 7px; gap: 4px; font-size: 11.5px; color: var(--text3); }
+  .stbtn.on { color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent); }
+  .card.done { opacity: .6; transition: opacity var(--t) var(--ease); }
+  .card.done:hover, .card.done:focus-within { opacity: 1; }
+  .pill.okp { background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--green); }
   .del { margin-left: auto; padding: 2px 8px; font-size: 11.5px; gap: 5px; color: var(--text3); white-space: nowrap; }
   .del:hover:not(:disabled) { color: var(--red); }
   .del.confirm { color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); }

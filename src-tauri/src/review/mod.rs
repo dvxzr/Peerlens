@@ -106,6 +106,61 @@ pub fn anchor(f: &mut crate::agents::parser::Finding, files: &[FileDiff]) {
     }
 }
 
+/// Whether the user has not closed this finding (open, or open but outdated).
+pub fn is_open(f: &crate::agents::parser::Finding) -> bool {
+    f.status.is_empty() || f.status == "outdated"
+}
+
+/// First new-side line where the finding's snippet now starts in `files` (closest to its old line), if any.
+fn relocate(f: &crate::agents::parser::Finding, files: &[FileDiff]) -> Option<u32> {
+    let want: Vec<&str> = f
+        .snippet
+        .as_deref()?
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let fd = files.iter().find(|d| d.new_path == f.file)?;
+    let have: Vec<(u32, &str)> = fd
+        .lines
+        .iter()
+        .filter(|l| matches!(l.k, '+' | ' '))
+        .filter_map(|l| Some((l.n?, l.t.trim())))
+        .filter(|(_, t)| !t.is_empty())
+        .collect();
+    if want.is_empty() || have.len() < want.len() {
+        return None;
+    }
+    let old = f.start_line?;
+    have.windows(want.len())
+        .filter(|w| w.iter().zip(&want).all(|((_, a), b)| a == b))
+        .map(|w| w[0].0)
+        .min_by_key(|n| n.abs_diff(old))
+}
+
+/// Earlier findings after the MR moved to a new head. In files the new commits (`changed`) did not touch,
+/// lines stay valid. In touched files a finding follows its snippet, or becomes "outdated" when it is gone.
+/// Closed findings keep their status. All are re-anchored to the current MR diff (`files`).
+pub fn carry_over(findings: &mut [crate::agents::parser::Finding], changed: &[FileDiff], files: &[FileDiff]) {
+    for f in findings {
+        let touched = changed.iter().any(|c| c.new_path == f.file || c.old_path == f.file);
+        if let (true, Some(s)) = (touched, f.start_line) {
+            match relocate(f, files) {
+                Some(n) => {
+                    f.end_line = f
+                        .end_line
+                        .map(|e| (e as i64 + n as i64 - s as i64).max(n as i64) as u32);
+                    f.start_line = Some(n);
+                }
+                None if f.status.is_empty() => f.status = "outdated".into(),
+                None => {}
+            }
+        }
+        f.anchored = false;
+        anchor(f, files);
+    }
+}
+
 /// Usage guards so reviews stay human-paced.
 #[derive(Debug, Clone)]
 pub struct Limits {
@@ -146,6 +201,7 @@ pub async fn run_review(
     only_file: Option<&str>,
     limits: &Limits,
     mut base: StoredReview,
+    incremental: Option<&str>,
     cancel: &mut watch::Receiver<bool>,
     emit: &(dyn Fn(ReviewEvent) + Sync),
 ) -> StoredReview {
@@ -190,6 +246,7 @@ pub async fn run_review(
             &chunk_files,
             (total > 1).then_some((ci + 1, total)),
             spec.repo.as_deref(),
+            incremental,
         );
         let mut asm = LineAssembler::default();
         let mut raw = String::new();
@@ -255,4 +312,74 @@ pub async fn run_review(
     }
     base.raw = raw_all;
     base
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agents::parser::Finding;
+    use crate::diff::from_raw;
+    use crate::gitlab::models::RawDiff;
+
+    fn fd(path: &str, diff: &str) -> FileDiff {
+        from_raw(RawDiff {
+            old_path: path.into(),
+            new_path: path.into(),
+            diff: diff.into(),
+            ..Default::default()
+        })
+    }
+    fn finding(file: &str, line: u32, snippet: &str) -> Finding {
+        Finding {
+            file: file.into(),
+            start_line: Some(line),
+            end_line: Some(line + 1),
+            snippet: Some(snippet.into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn carry_over_follows_moved_code_and_marks_gone_code_outdated() {
+        // Current MR diff: two lines were inserted above `call(x)`, which moved from line 2 to line 4.
+        let files = vec![
+            fd(
+                "a.rs",
+                "@@ -1,3 +1,5 @@\n fn f() {\n+    let a = 1;\n+    let b = 2;\n     call(x);\n+    more();\n }\n",
+            ),
+            fd("b.rs", "@@ -1,2 +1,2 @@\n-old()\n+new()\n keep()\n"),
+        ];
+        let changed = files.clone(); // the new commits touched both files
+        let mut fs = vec![
+            finding("a.rs", 2, "    call(x);\n    more();"),
+            finding("b.rs", 1, "old()"),
+            Finding {
+                status: "dismissed".into(),
+                ..finding("b.rs", 1, "gone()")
+            },
+            finding("c.rs", 7, "untouched"),
+        ];
+        carry_over(&mut fs, &changed, &files);
+        assert_eq!(
+            (fs[0].start_line, fs[0].end_line, fs[0].status.as_str()),
+            (Some(4), Some(5), "")
+        );
+        assert!(fs[0].anchored);
+        assert_eq!(fs[1].status, "outdated", "snippet no longer in the diff");
+        assert_eq!(fs[2].status, "dismissed", "closed findings keep their status");
+        assert_eq!(
+            (fs[3].start_line, fs[3].status.as_str()),
+            (Some(7), ""),
+            "untouched file keeps its lines"
+        );
+        assert!(!fs[3].anchored, "not in the MR diff any more");
+    }
+
+    #[test]
+    fn relocate_picks_the_occurrence_closest_to_the_old_line() {
+        let files = vec![fd("a.rs", "@@ -1,0 +1,5 @@\n+x()\n+y\n+z\n+w\n+x()\n")];
+        assert_eq!(relocate(&finding("a.rs", 5, "x()"), &files), Some(5));
+        assert_eq!(relocate(&finding("a.rs", 2, "  x()  "), &files), Some(1));
+        assert_eq!(relocate(&finding("a.rs", 2, "\n \n"), &files), None, "blank snippet");
+    }
 }

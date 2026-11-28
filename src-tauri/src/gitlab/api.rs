@@ -139,6 +139,26 @@ pub async fn commit_diff(g: &Glab, project_id: u64, sha: &str) -> Result<Vec<Fil
     Ok(raw.into_iter().map(diff::from_raw).collect())
 }
 
+/// Literal diff between two commits (`straight`: no merge base), for reviewing only what changed since `from`.
+pub async fn compare(g: &Glab, project_id: u64, from: &str, to: &str) -> Result<Vec<FileDiff>> {
+    let hex = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_hexdigit());
+    if !hex(from) || !hex(to) {
+        return Err(AppError::Rejected(format!("sha {from}..{to}")));
+    }
+    #[derive(serde::Deserialize)]
+    struct Compare {
+        #[serde(default)]
+        diffs: Vec<RawDiff>,
+    }
+    let c: Compare = get(
+        g,
+        &format!("projects/{project_id}/repository/compare?from={from}&to={to}&straight=true"),
+        false,
+    )
+    .await?;
+    Ok(c.diffs.into_iter().map(diff::from_raw).collect())
+}
+
 pub async fn discussions(g: &Glab, project_id: u64, iid: u64) -> Result<Vec<Discussion>> {
     let mut ds: Vec<Discussion> = get(
         g,
@@ -230,6 +250,13 @@ mod tests {
         assert!(files[2].binary);
         // project 20 has no /diffs fixture → falls back to /changes
         assert_eq!(mr_diffs(&g, 20, 3).await.unwrap().len(), 1);
+        let inc = compare(&g, 10, "def456", "abc123").await.unwrap();
+        assert_eq!(inc.len(), 1);
+        assert!(inc[0].has_new_line(3));
+        assert!(
+            compare(&g, 10, "def456;rm", "abc123").await.is_err(),
+            "non-hex sha rejected"
+        );
         let ds = discussions(&g, 10, 1).await.unwrap();
         // Masked bot name ("****") is replaced from users/:id.
         assert!(

@@ -10,6 +10,10 @@ export interface ReviewState {
   errors: string[];
   raw: string;
   headSha: string;
+  /** "whole MR" or the reviewed file's path. */
+  scope: string;
+  /** Incremental review: head of the earlier review it builds on. */
+  since: string;
   createdAt: number | null;
   cancelled: boolean;
   meta: string;
@@ -31,7 +35,7 @@ export async function loadUsage() {
 
 const empty = (): ReviewState => ({
   running: false, progress: null, findings: [], summaries: [], skipped: [], errors: [], raw: "",
-  headSha: "", createdAt: null, cancelled: false, meta: "", repoStage: "", repo: null, activity: [],
+  headSha: "", scope: "", since: "", createdAt: null, cancelled: false, meta: "", repoStage: "", repo: null, activity: [],
   threads: {}, chat: null, chatError: null,
 });
 
@@ -42,8 +46,8 @@ const key = (pid: number, iid: number) => `${pid}:${iid}`;
 function fromStored(r: StoredReview): ReviewState {
   return {
     ...empty(), findings: r.findings, summaries: r.summaries, skipped: r.skipped, errors: r.errors, raw: r.raw,
-    headSha: r.head_sha, createdAt: r.created_at * 1000, cancelled: r.cancelled,
-    meta: `${r.agent}${r.model ? " / " + r.model : ""}${r.effort ? " / " + r.effort : ""} · ${r.language} · ${r.scope}${r.repo ? " · repo context" : ""}`,
+    headSha: r.head_sha, scope: r.scope, since: r.since ?? "", createdAt: r.created_at * 1000, cancelled: r.cancelled,
+    meta: `${r.agent}${r.model ? " / " + r.model : ""}${r.effort ? " / " + r.effort : ""} · ${r.language} · ${r.scope}${r.since ? ` · new commits since ${r.since.slice(0, 7)}` : ""}${r.repo ? " · repo context" : ""}`,
     repo: r.repo ?? null, repoStage: r.repo ? "ready" : "", activity: r.activity ?? [], threads: r.threads ?? {},
   };
 }
@@ -66,13 +70,14 @@ export function get(pid: number, iid: number): ReviewState | undefined {
 
 export async function start(
   pid: number, iid: number, agent: AgentKind, model: string, effort: string, scopeFile: string | null, language: string,
-  repoContext: boolean, notes: string,
+  repoContext: boolean, notes: string, since: string | null = null,
 ) {
   const k = key(pid, iid);
+  const prev = reviews[k]; // shown again if the run fails before producing anything
   reviews[k] = { ...empty(), running: true };
   const s = reviews[k];
   try {
-    await api.startReview({ projectId: pid, iid }, agent, model, effort, scopeFile, language, repoContext, notes, (e) => {
+    await api.startReview({ projectId: pid, iid }, agent, model, effort, scopeFile, language, repoContext, notes, since, (e) => {
       switch (e.type) {
         case "started": s.skipped = e.skipped; break;
         case "progress": s.progress = { chunk: e.chunk, total: e.total, files: e.files }; break;
@@ -86,10 +91,18 @@ export async function start(
       }
     });
   } catch (e) {
-    s.errors.push(errText(e));
+    if (prev?.createdAt && !s.findings.length) reviews[k] = { ...prev, errors: [...prev.errors, errText(e)] };
+    else s.errors.push(errText(e));
   } finally {
     reviews[k].running = false;
   }
+}
+
+/** Mark a finding fixed / dismissed, or reopen it (""). */
+export async function setStatus(pid: number, iid: number, index: number, status: "" | "fixed" | "dismissed") {
+  await api.setFindingStatus({ projectId: pid, iid }, index, status);
+  const f = reviews[key(pid, iid)]?.findings[index];
+  if (f) f.status = status;
 }
 
 export async function remove(pid: number, iid: number) {

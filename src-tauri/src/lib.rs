@@ -58,6 +58,7 @@ pub fn run() {
             commands::clear_repo_cache,
             commands::discuss_finding,
             commands::delete_thread,
+            commands::set_finding_status,
             commands::default_guidelines,
             commands::app_version,
             commands::check_update,

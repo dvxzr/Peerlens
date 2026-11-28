@@ -29,6 +29,7 @@ export const api = {
   repoCacheInfo: () => invoke<CacheInfo>("repo_cache_info"),
   clearRepoCache: () => invoke<void>("clear_repo_cache"),
   deleteThread: (id: Id, index: number) => invoke<void>("delete_thread", { ...id, index }),
+  setFindingStatus: (id: Id, index: number, status: string) => invoke<void>("set_finding_status", { ...id, index, status }),
   defaultGuidelines: () => invoke<string>("default_guidelines"),
   appVersion: () => invoke<string>("app_version"),
   checkUpdate: () => invoke<UpdateInfo | null>("check_update"),
@@ -39,11 +40,11 @@ export const api = {
   },
   startReview: (
     id: Id, agent: AgentKind, model: string, effort: string, scopeFile: string | null, language: string, repoContext: boolean,
-    notes: string, onEvent: (e: ReviewEvent) => void,
+    notes: string, since: string | null, onEvent: (e: ReviewEvent) => void,
   ) => {
     const ch = new Channel<ReviewEvent>();
     ch.onmessage = onEvent;
-    return invoke<void>("start_review", { ...id, agent, model, effort, scopeFile, language, repoContext, notes, onEvent: ch });
+    return invoke<void>("start_review", { ...id, agent, model, effort, scopeFile, language, repoContext, notes, since, onEvent: ch });
   },
 };
 

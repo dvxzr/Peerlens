@@ -8,7 +8,7 @@
   import { cubicOut } from "svelte/easing";
   import { updates } from "../lib/updates.svelte";
   import { ensureLoaded, get } from "../lib/review.svelte";
-  import { avatarColor, initials, worstSeverity } from "../lib/text";
+  import { avatarColor, initials, unresolved, worstSeverity } from "../lib/text";
 
   let { mrs, loading, error, refreshedAt, selected, showAll, onselect, onrefresh, onscope, onsettings }: {
     mrs: MrSummary[]; loading: boolean; error: string; refreshedAt: number | null; selected: MrSummary | null; showAll: boolean;
@@ -36,7 +36,7 @@
     for (const m of mrs) ensureLoaded(m.project_id, m.iid);
   });
   function findings(m: MrSummary) {
-    const f = get(m.project_id, m.iid)?.findings ?? [];
+    const f = (get(m.project_id, m.iid)?.findings ?? []).filter(unresolved);
     return f.length ? { n: f.length, worst: worstSeverity(f.map((x) => x.severity)) } : null;
   }
 

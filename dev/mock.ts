@@ -178,7 +178,7 @@ const handlers: Record<string, (a: any) => any> = {
   get_settings: () => settings,
   save_settings: () => null,
   list_my_mrs: () => new Promise((r) => setTimeout(() => r({ me: user("me", "Me"), mrs }), 300)),
-  mr_details: (a) => ({ ...mrs.find((m) => m.iid === a.iid), description: "Limits failed logins to 5 per 15 minutes per user name.\n\n- `RateLimiter` with a sliding window\n- 429 handling in the web client", state: "opened", detailed_merge_status: "mergeable", head_pipeline: { status: "failed", web_url: "" }, diff_refs: { base_sha: "0", head_sha: "abc123", start_sha: "0" }, source_project_id: a.projectId }),
+  mr_details: (a) => ({ ...mrs.find((m) => m.iid === a.iid), description: "Limits failed logins to 5 per 15 minutes per user name.\n\n- `RateLimiter` with a sliding window\n- 429 handling in the web client", state: "opened", detailed_merge_status: "mergeable", head_pipeline: { status: "failed", web_url: "" }, diff_refs: { base_sha: "0", head_sha: new URLSearchParams(location.search).has("stale") ? "bcd234" : "abc123", start_sha: "0" }, source_project_id: a.projectId }),
   mr_diffs: () => new Promise((r) => setTimeout(() => r(fileDiffs), 200)),
   mr_commits: () => [{ id: "abc123def", short_id: "abc123d", title: "Add login rate limiter", author_name: "Alice Developer", authored_date: new Date().toISOString(), web_url: "" }, { id: "fed321", short_id: "fed321c", title: "Handle 429 in the web client and add limiter tests", author_name: "Alice Developer", authored_date: new Date().toISOString(), web_url: "" }],
   commit_diff: () => fileDiffs.slice(0, 1),
@@ -232,6 +232,7 @@ const handlers: Record<string, (a: any) => any> = {
     a.onEvent.onmessage({ type: "done", thread: t });
   },
   delete_thread: (a) => { delete review.threads[a.index]; return null; },
+  set_finding_status: (a) => { const f = reviews[a.iid]?.findings[a.index]; if (f) f.status = a.status; return null; },
 };
 let cbId = 0;
 (window as any).__TAURI_INTERNALS__ = {

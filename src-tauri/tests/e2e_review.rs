@@ -73,6 +73,7 @@ async fn review_with(
         None,
         &limits,
         StoredReview::default(),
+        None,
         &mut rx,
         &emit,
     )
@@ -229,6 +230,7 @@ async fn repo_context_snapshot_is_readonly_input_and_cached() {
         None,
         &Limits::default(),
         StoredReview::default(),
+        None,
         &mut rx,
         &emit,
     )
@@ -272,6 +274,7 @@ async fn codex_review(mode: &str, repo: Option<std::path::PathBuf>) -> StoredRev
         None,
         &Limits::default(),
         StoredReview::default(),
+        None,
         &mut rx,
         &|_| {},
     )

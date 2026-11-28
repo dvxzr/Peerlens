@@ -274,9 +274,22 @@ pub async fn start_review(
     language: String,
     repo_context: bool,
     notes: String,
+    since: Option<String>,
     on_event: Channel<ReviewEvent>,
 ) -> Result<()> {
+    use crate::error::AppError::Agent;
     let s = st.settings.lock().unwrap().clone();
+    // Incremental: review only what changed since the saved whole-MR review at `since`, then merge.
+    let prev = match since.as_deref() {
+        None => None,
+        Some(old) => Some(
+            storage::default_dir()
+                .and_then(|d| storage::load_latest(&d, project_id, iid))
+                .filter(|p| p.head_sha == old && p.scope == WHOLE_MR)
+                .ok_or_else(|| Agent("The saved review changed. Run a full review.".into()))?,
+        ),
+    };
+    let scope_file = if prev.is_some() { None } else { scope_file };
     let g = Glab::from_settings(&s)?;
     let info = agents::detect(&s)
         .into_iter()
@@ -298,6 +311,25 @@ pub async fn start_review(
         .map(|d| d.head_sha.clone())
         .or(mr.sha.clone())
         .unwrap_or_default();
+    // The diff to review: the whole MR, or for an incremental review the MR files changed since `prev`.
+    let mut changed = Vec::new();
+    if let Some(p) = &prev {
+        if p.head_sha == head_sha {
+            return Err(Agent("No new commits since the saved review.".into()));
+        }
+        changed = api::compare(&g, project_id, &p.head_sha, &head_sha)
+            .await
+            .map_err(|e| {
+                Agent(format!(
+                    "Could not compare with the reviewed commit ({e}). Run a full review."
+                ))
+            })?;
+        // shortcut: after a rebase, kept files may still carry target-branch hunks; the prompt says to ignore them.
+        changed.retain(|c| files.iter().any(|f| f.new_path == c.new_path));
+    }
+    let incremental = prev
+        .as_ref()
+        .map(|p| review::prompt::incremental_note(&p.head_sha, &p.findings));
     let language = if language.trim().is_empty() {
         s.review_language.clone()
     } else {
@@ -340,7 +372,7 @@ pub async fn start_review(
         model,
         effort,
         language,
-        scope: scope_file.clone().unwrap_or_else(|| "whole MR".into()),
+        scope: scope_file.clone().unwrap_or_else(|| WHOLE_MR.into()),
         repo: snap.as_ref().map(|x| x.stats.clone()),
         snapshot: snap.as_ref().map(|x| x.key.clone()).unwrap_or_default(),
         ..Default::default()
@@ -357,8 +389,43 @@ pub async fn start_review(
         chunk_delay: std::time::Duration::from_secs(s.chunk_delay_secs),
         max_usage_pct: s.max_usage_pct,
     };
-    let mut r = review::run_review(&spec, &mr, &files, scope_file.as_deref(), &limits, base, &mut rx, &emit).await;
+    let to_review = if prev.is_some() { &changed } else { &files };
+    let mut r = review::run_review(
+        &spec,
+        &mr,
+        to_review,
+        scope_file.as_deref(),
+        &limits,
+        base,
+        incremental.as_deref(),
+        &mut rx,
+        &emit,
+    )
+    .await;
     r.created_at = now_secs();
+    if let Some(mut p) = prev {
+        // An unfinished increment would be lost at the next run (its head counts as reviewed): keep the old review.
+        if r.cancelled || !r.errors.is_empty() {
+            p.errors = r.errors;
+            p.errors
+                .push("The incremental review did not finish, so the saved review was kept.".into());
+            p.cancelled = r.cancelled;
+            emit(ReviewEvent::Done { review: Box::new(p) });
+            return Ok(());
+        }
+        review::carry_over(&mut p.findings, &changed, &files);
+        for f in &mut r.findings {
+            f.anchored = false;
+            review::anchor(f, &files); // anchored to the increment so far; the panel shows the MR diff
+        }
+        p.findings.append(&mut r.findings);
+        r.findings = p.findings;
+        r.threads = p.threads; // keyed by index: earlier findings keep theirs
+        if r.summaries.is_empty() {
+            r.summaries = p.summaries;
+        }
+        r.since = p.head_sha;
+    }
     if let Some(dir) = storage::default_dir() {
         if let Err(e) = storage::save(&dir, &r) {
             r.errors.push(format!("could not save review: {e}"));
@@ -366,6 +433,26 @@ pub async fn start_review(
     }
     emit(ReviewEvent::Done { review: Box::new(r) });
     Ok(())
+}
+
+/// `StoredReview::scope` of a whole-MR review (otherwise it holds the reviewed file's path).
+const WHOLE_MR: &str = "whole MR";
+
+/// Mark a finding fixed / dismissed, or reopen it ("").
+#[tauri::command]
+pub fn set_finding_status(project_id: u64, iid: u64, index: usize, status: String) -> Result<()> {
+    use crate::error::AppError::{Agent, Rejected};
+    if !["", "fixed", "dismissed"].contains(&status.as_str()) {
+        return Err(Rejected(format!("status {status}")));
+    }
+    let dir = storage::default_dir().ok_or_else(|| Agent("No app data directory.".into()))?;
+    let mut r = storage::load_latest(&dir, project_id, iid).ok_or_else(|| Agent("Run a review first.".into()))?;
+    let f = r
+        .findings
+        .get_mut(index)
+        .ok_or_else(|| Agent("This finding no longer exists. Reload the review.".into()))?;
+    f.status = status;
+    storage::save(&dir, &r)
 }
 
 /// The effort level if this agent's CLI accepts it.
@@ -400,7 +487,7 @@ pub async fn discuss_finding(
         return Err(Agent("Write a message first.".into()));
     }
     let dir = storage::default_dir().ok_or_else(|| Agent("No app data directory.".into()))?;
-    let mut stored = storage::load_latest(&dir, project_id, iid).ok_or_else(|| Agent("Run a review first.".into()))?;
+    let stored = storage::load_latest(&dir, project_id, iid).ok_or_else(|| Agent("Run a review first.".into()))?;
     let finding = stored
         .findings
         .get(index)
@@ -505,6 +592,10 @@ pub async fn discuss_finding(
             format!(" / {model}")
         }
     );
+    // Re-read: the user may have changed finding statuses while the agent was answering.
+    let mut stored = storage::load_latest(&dir, project_id, iid)
+        .filter(|r| (r.head_sha.as_str(), r.created_at) == (stored.head_sha.as_str(), stored.created_at))
+        .ok_or_else(|| Agent("The review changed while the agent was answering.".into()))?;
     let thread = stored.threads.entry(index).or_default();
     thread.push(storage::ThreadMsg {
         role: "user".into(),

@@ -42,10 +42,12 @@ export interface Finding {
   file: string; start_line: number | null; end_line: number | null; severity: string; category: string;
   title: string; explanation: string; snippet: string | null;
   suggestion: { description: string; code: string } | null; anchored: boolean;
+  /** "" open, "fixed" / "dismissed" by the user, "outdated" when new commits changed its code. */
+  status?: "" | "fixed" | "dismissed" | "outdated";
 }
 export interface Skipped { path: string; reason: string }
 export interface StoredReview {
-  project_id: number; iid: number; head_sha: string; agent: string; model: string; effort: string; language: string; scope: string;
+  project_id: number; iid: number; head_sha: string; since?: string; agent: string; model: string; effort: string; language: string; scope: string;
   created_at: number; findings: Finding[]; summaries: string[]; raw: string; skipped: Skipped[]; errors: string[]; cancelled: boolean;
   usage: Usage | null;
   activity: string[];
